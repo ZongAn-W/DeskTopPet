@@ -1,47 +1,111 @@
-# Build output
+# ---------------------------------------------------------------------------
+# Desktop Pet (.NET 8 / WPF) — ignored paths
+#
+# Everything below is generated or machine-specific. A fresh clone plus
+# `dotnet build` / `dotnet test` reproduces all of it, so none of it is tracked.
+# ---------------------------------------------------------------------------
+
+# --- Build output ---
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
+[Ll]og/
+artifacts/
+*.dll
+*.exe
+*.pdb
+*.cache
 
-# Published / packaged application output
+# --- Publish output (publish.ps1 writes a self-contained win-x64 build here) ---
+# Not tracked: the binary is ~150 MB. Build it locally or attach it to a
+# GitHub Release instead of committing it.
 [Pp]ublish/
 
-# Visual Studio / Rider / VS Code
+# --- Visual Studio / Rider / VS Code ---
 .vs/
 .idea/
 .vscode/
 *.user
+*.rsuser
 *.suo
-*.userprefs
+*.userosscache
 *.sln.docstates
+*.userprefs
+*.svclog
+launchSettings.json
+.vsconfig
+.fleet/
+.history/
 
-# Test and coverage output
+# --- Test, coverage, and profiling output ---
 [Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
 coverage*.json
 coverage*.xml
-*.coverage
+coverage*.info
 *.coverlet.json
+[Cc]overage[Rr]eport/
+*.dotCover
+*.ncrunch*
+_ReSharper*/
+*.psess
+*.vsp
+*.vspx
 
-# NuGet
+# --- NuGet ---
 *.nupkg
 *.snupkg
 packages/
 .nuget/
+project.lock.json
+project.fragment.lock.json
 
-# MSBuild / build logs
+# --- MSBuild and build logs ---
 *.binlog
 msbuild.log
 msbuild.err
 msbuild.wrn
+*.buildlog
 
-# OS noise
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-.DS_Store
+# --- Source photographs and scratch media (privacy + size) ---
+# tools/make_photo_pet.py reads tools/reference.jpg. The source photograph is
+# deliberately never committed and never bundled: only the derived,
+# background-free PNG frames under src/DesktopPet/Assets/Character/ are tracked.
+tools/reference.jpg
+tools/reference.jpeg
+tools/reference.png
 
-# Local scratch
+# Scratch frames extracted from the reference video while authoring the art.
+# Nothing in the app reads these, and they are regenerable from the video:
+#   frame.raw     raw RGBA dump (180 x 210 x 4 = 151,200 bytes)
+#   mov_frame.png / sample.png   inspection stills
+*.raw
+tools/mov_frame.png
+tools/sample.png
+
+# Other media formats are scratch unless the project explicitly ships them.
+*.mov
+!src/DesktopPet/Assets/idle_blink.mov
+*.psd
+*.xcf
+*.blend*
+
+# --- Python tooling ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Local scratch ---
 *.tmp
 *.bak
+*.orig
+*.rej
+*.swp
+*~
 *.log
