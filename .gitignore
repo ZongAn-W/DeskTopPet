@@ -1,0 +1,47 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+
+# Published / packaged application output
+[Pp]ublish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.sln.docstates
+
+# Test and coverage output
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.coverage
+*.coverlet.json
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# MSBuild / build logs
+*.binlog
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# OS noise
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# Local scratch
+*.tmp
+*.bak
+*.log

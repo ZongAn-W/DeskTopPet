@@ -1,0 +1,3 @@
+# Character asset replacement
+
+The first build uses the vector placeholder in `PetVisual.cs`, so no reference photographs are read or shipped. Add final transparent PNG frames under `Assets/Character` and rebuild. The app embeds and selects them automatically. Use these prefixes: `idle`, `walk_left`, `walk_right`, `respond`, `sleep`, and `drag`. Number frames from `_00.png` upward without gaps, for example `idle_00.png`, `idle_01.png`. Every state must have at least one frame once any final art is present. Keep all images on a 180 x 210 canvas with a stable feet baseline and no original photo backgrounds, text, or watermarks. Do not copy the source photographs into the application output.

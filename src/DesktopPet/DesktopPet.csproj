@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>DesktopPet</AssemblyName>
+    <RootNamespace>DesktopPet</RootNamespace>
+    <Platforms>AnyCPU</Platforms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DesktopPet.Core\DesktopPet.Core.csproj" />
+    <Resource Include="Assets\Character\*.png" />
+    <Content Include="Assets\idle_blink.mov" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
