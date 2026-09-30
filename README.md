@@ -90,7 +90,8 @@ src/DesktopPet/                 WPF front end (net8.0-windows)
   SpriteAnimator.cs             Loads and sequences PNG frames per state
   TrayController.cs             Generated tray icon and notification-area menu
   Assets/Character/             Committed PNG frames (see Assets/README.md)
-  Assets/idle_blink.mov         Reference clip the blink frames were extracted from
+  Assets/idle_blink.mov         Reference clip the 122 idle frames were extracted from.
+                                Kept in the repo but not copied to the build output
 
 tests/DesktopPet.Core.Tests/    xUnit tests for the core library
 tools/make_photo_pet.py         OpenCV/Pillow script that cut the frames out of the source photo
@@ -113,6 +114,11 @@ animator discovers them by state prefix:
 | `respond` | Click response | 8 fps |
 | `sleep` | Sleeping | 8 fps |
 | `drag` | Being dragged | 8 fps |
+
+Idle is played as a transparent PNG sequence rather than as video. A `MediaElement` was tried and
+abandoned: WPF mishandles the alpha channel of qtrle/ARGB video, which makes the character's hair
+and clothing render as transparent holes. The PNG frames carry a real alpha channel
+(`Format32bppArgb`, alpha values spanning 0–255), so do not reintroduce video playback for the pet.
 
 Rules the loader enforces:
 

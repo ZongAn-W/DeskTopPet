@@ -13,6 +13,9 @@
   <ItemGroup>
     <ProjectReference Include="..\DesktopPet.Core\DesktopPet.Core.csproj" />
     <Resource Include="Assets\Character\*.png" />
-    <Content Include="Assets\idle_blink.mov" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Kept in the repository as the source the idle frames were extracted from.
+         Deliberately NOT copied to the build output: it is 24.8 MB and nothing
+         reads it at runtime. Idle playback uses the embedded PNG frames. -->
+    <None Include="Assets\idle_blink.mov" />
   </ItemGroup>
 </Project>
