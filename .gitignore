@@ -88,10 +88,16 @@ tools/sample.png
 
 # Other media formats are scratch unless the project explicitly ships them.
 *.mov
-!src/DesktopPet/Assets/idle_blink.mov
 *.psd
 *.xcf
 *.blend*
+
+# Deliberately untracked, see README "Character frames".
+# This is the 24.8 MB reference clip the 122 idle frames were extracted from.
+# It stays on the author's disk and is never committed: it is the single largest
+# file in the project (about 99.9% of the repository size) and nothing reads it
+# at runtime. Re-create any frame with ffmpeg if you need to re-extract.
+src/DesktopPet/Assets/idle_blink.mov
 
 # --- Python tooling ---
 __pycache__/

@@ -90,8 +90,9 @@ src/DesktopPet/                 WPF front end (net8.0-windows)
   SpriteAnimator.cs             Loads and sequences PNG frames per state
   TrayController.cs             Generated tray icon and notification-area menu
   Assets/Character/             Committed PNG frames (see Assets/README.md)
-  Assets/idle_blink.mov         Reference clip the 122 idle frames were extracted from.
-                                Kept in the repo but not copied to the build output
+  Assets/idle_blink.mov         NOT in the repository: the 24.8 MB reference clip the
+                                122 idle frames were extracted from. Kept on the
+                                author's disk and git-ignored
 
 tests/DesktopPet.Core.Tests/    xUnit tests for the core library
 tools/make_photo_pet.py         OpenCV/Pillow script that cut the frames out of the source photo
@@ -132,6 +133,16 @@ Rules the loader enforces:
 The committed art is currently one frame per state except `idle`, which has 122 frames for the
 blink cycle. With no frames present at all, the app falls back to the vector placeholder drawn
 in `PetVisual.cs` and still runs.
+
+The clip the idle frames came from, `src/DesktopPet/Assets/idle_blink.mov` (24.8 MB, QuickTime
+qtrle/ARGB), is **not committed**. It is the single largest file in the project and used to make
+up ~99.9% of the repository size, and nothing reads it at runtime, so it is git-ignored and kept
+only on the author's disk. The 122 frames derived from it are fully committed, so a clone can
+build and run without it. To re-extract frames after editing that clip:
+
+```powershell
+ffmpeg -i src/DesktopPet/Assets/idle_blink.mov -vf "format=rgba" idle_%03d.png
+```
 
 To regenerate art from a photograph, place it at `tools/reference.jpg` and run
 `python tools/make_photo_pet.py` (requires `opencv-python` and `Pillow`). That script writes the
