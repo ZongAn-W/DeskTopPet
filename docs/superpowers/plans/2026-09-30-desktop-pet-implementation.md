@@ -57,7 +57,8 @@
 - [x] Implement vector placeholder rendering with black long hair, soft face, pale knit outfit, colorful accents, idle blink/breathing, walk direction, click wave, and sleep pose.
 - [x] Wire a dispatcher timer to core ticks, screen placement, pointer click/drag threshold, right-click context menu, and monitor changes.
 - [x] Implement a Windows Forms tray icon with pause/resume, sleep/wake, and exit commands; keep right-click exit available if tray initialization fails.
-- [ ] Confirm transparency, animation, pointer hit area, and menu behavior visually on the desktop. Build and responsive visible top-level window are confirmed.
+- [x] Confirm transparency, animation, pointer hit area, and menu behavior visually on the desktop. Build and responsive visible top-level window are confirmed. Transparency and idle animation were later verified from screenshots of the running published build; the context and tray menus were verified by code inspection only.
+- [ ] Verify the right-click context menu and tray menu by hand.
 
 ### Task 4: Publish and acceptance verification
 
@@ -68,4 +69,4 @@
 - [x] Document placeholder-art replacement, runtime behavior, settings path, and excluded first-version features.
 - [x] Publish self-contained Windows x64 single-file executable via `publish.ps1`.
 - [x] Verify the publish directory contains the executable; SDK-less machine remains untested.
-- [ ] Verify in-app exit, full desktop interaction, and dual-monitor dragging. Published startup and the full core test suite are confirmed.
+- [ ] Verify in-app exit, full desktop interaction, and dual-monitor dragging. Published startup, the full core test suite, transparency, auto-sleep, bounded walking, and the corrupt/missing/BOM preferences fallbacks are confirmed by running the published build.

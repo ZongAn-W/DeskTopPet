@@ -16,20 +16,36 @@ public partial class PetWindow : Window
 {
     private const double PetWidth = 180;
     private const double PetHeight = 210;
+    // Travel speed is configured independently for each direction, in DIP per tick.
+    //
+    // This must be accumulated rather than assigned straight to Window.Left. Assigning a fractional
+    // amount every tick looks right in the property but never reaches the screen: the window position
+    // is snapped, so a sub-pixel step is silently dropped and the pet crawls at a fixed rate no matter
+    // what the setting says. Measured here, 1.1 and 1.65 px/tick both travelled at 21 px/s until the
+    // leftover was carried forward.
+    //
+    // With the remainder carried, the effective rate is about 15 px/s per unit at the default timer
+    // cadence. The right-click menu exposes the supported values for each direction.
+    private double _leftWalkSpeed = WalkSpeedOptions.Default;
+    private double _rightWalkSpeed = WalkSpeedOptions.Default;
+    private MenuItem? _leftSpeedMenu;
+    private MenuItem? _rightSpeedMenu;
+    // Leftover DIP from the previous tick, carried forward so no fraction of a step is lost.
+    private double _travelRemainder;
+    // Do not start a stroll with less than this much room to the left, so a stroll always visibly
+    // travels instead of grinding against the edge of the working area.
+    private const double MinStrollRoomPx = 12;
     private readonly PetController _controller = new();
     private readonly PreferencesStore _preferences = new();
     private readonly DispatcherTimer _timer;
     private TrayController? _tray;
     private DateTime _lastTick = DateTime.UtcNow;
     private DateTime _nextWalk = DateTime.UtcNow.AddSeconds(2);
-    private bool _walkingRight = true;
-    private double _targetX;
     private WpfPoint _pressPoint;
     private double _pressLeft;
     private double _pressTop;
     private bool _dragging;
     private bool _closing;
-    private DateTime _walkUntil = DateTime.MinValue;
 
     public PetWindow()
     {
@@ -50,6 +66,9 @@ public partial class PetWindow : Window
     {
         var saved = _preferences.Load();
         _controller.Restore(saved.IsPaused, saved.IsManualSleeping);
+        _leftWalkSpeed = WalkSpeedOptions.Normalize(saved.LeftWalkSpeed);
+        _rightWalkSpeed = WalkSpeedOptions.Normalize(saved.RightWalkSpeed);
+        UpdateSpeedMenus();
         PlaceFromPreferences(saved);
         try
         {
@@ -70,18 +89,63 @@ public partial class PetWindow : Window
         pause.Click += (_, _) => TogglePause();
         var sleep = new MenuItem { Header = "睡觉" };
         sleep.Click += (_, _) => ToggleSleep();
+        var speed = new MenuItem { Header = "行进速度" };
+        _leftSpeedMenu = CreateSpeedMenu("左向速度", goLeft: true);
+        _rightSpeedMenu = CreateSpeedMenu("右向速度", goLeft: false);
+        speed.Items.Add(_leftSpeedMenu);
+        speed.Items.Add(_rightSpeedMenu);
         var exit = new MenuItem { Header = "退出" };
         exit.Click += (_, _) => Close();
         menu.Items.Add(pause);
         menu.Items.Add(sleep);
+        menu.Items.Add(speed);
         menu.Items.Add(new Separator());
         menu.Items.Add(exit);
         menu.Opened += (_, _) =>
         {
             pause.Header = _controller.IsPaused ? "继续走动" : "暂停走动";
             sleep.Header = _controller.IsManualSleeping || _controller.IsAutoSleeping ? "唤醒" : "睡觉";
+            UpdateSpeedMenus();
         };
         return menu;
+    }
+
+    private MenuItem CreateSpeedMenu(string header, bool goLeft)
+    {
+        var menu = new MenuItem { Header = header };
+        foreach (var speed in WalkSpeedOptions.Values)
+        {
+            var item = new MenuItem
+            {
+                Header = $"{speed:0.0} DIP/次",
+                Tag = speed,
+                IsCheckable = true
+            };
+            item.Click += (_, _) => SetWalkSpeed(goLeft, speed);
+            menu.Items.Add(item);
+        }
+        return menu;
+    }
+
+    private void SetWalkSpeed(bool goLeft, double speed)
+    {
+        var normalized = WalkSpeedOptions.Normalize(speed);
+        if (goLeft) _leftWalkSpeed = normalized;
+        else _rightWalkSpeed = normalized;
+        UpdateSpeedMenus();
+    }
+
+    private void UpdateSpeedMenus()
+    {
+        UpdateSpeedMenu(_leftSpeedMenu, _leftWalkSpeed);
+        UpdateSpeedMenu(_rightSpeedMenu, _rightWalkSpeed);
+    }
+
+    private static void UpdateSpeedMenu(MenuItem? menu, double speed)
+    {
+        if (menu is null) return;
+        foreach (var item in menu.Items.OfType<MenuItem>())
+            item.IsChecked = Equals(item.Tag, speed);
     }
 
     private void OnTick(object? sender, EventArgs e)
@@ -90,30 +154,51 @@ public partial class PetWindow : Window
         var elapsed = now - _lastTick;
         _lastTick = now;
         _controller.Advance(elapsed);
-        if (!_dragging && _controller.State is not (PetState.Sleeping or PetState.Responding) && !_controller.IsPaused)
+
+        if (!_dragging && !_controller.IsPaused)
         {
-            if (_controller.State is PetState.WalkingLeft or PetState.WalkingRight)
+            var area = CurrentMonitor().WorkingArea;
+
+            // The sprite sequences decide travel, not this loop. Leftward the walk-up and the walk
+            // cycle travel while the turns and the walk-down are acted in place; rightward only the
+            // walk module travels while the opening turn and final settle are acted in place.
+            if (_controller.IsMoving)
             {
-                var area = CurrentMonitor().WorkingArea;
-                var distance = _targetX - Left;
-                Left = PetGeometry.ClampX(Left + Math.Sign(distance) * Math.Min(Math.Abs(distance), 1.1), area, PetWidth);
-                if (Math.Abs(Left - _targetX) < 1.2 || now >= _walkUntil)
+                // Accumulate the fractional speed and only move by whole DIP, so the step is never
+                // rounded away by the window position snapping.
+                var walkSpeed = _controller.IsStrollingRight ? _rightWalkSpeed : _leftWalkSpeed;
+                _travelRemainder += walkSpeed;
+                var whole = Math.Floor(_travelRemainder);
+                if (whole >= 1)
                 {
-                    _controller.StopWalking();
-                    _nextWalk = now.AddSeconds(Random.Shared.Next(2, 6));
+                    _travelRemainder -= whole;
+                    var headingLeft = !_controller.IsStrollingRight;
+                    var target = headingLeft ? Left - whole : Left + whole;
+                    Left = PetGeometry.Step(Left, target, whole, area, PetWidth).X;
                 }
             }
-            else if (now >= _nextWalk)
+            else if (_controller.State == PetState.Idle && now >= _nextWalk)
             {
-                var area = CurrentMonitor().WorkingArea;
-                _targetX = PetGeometry.ClampX(Left + Random.Shared.Next(-150, 151), area, PetWidth);
-                _walkingRight = _targetX >= Left;
-                _controller.SetWalking(_walkingRight);
-                _walkUntil = now.AddSeconds(5);
+                var roomLeft = Left - area.Left;
+                var roomRight = area.Right - PetWidth - Left;
+                var canGoLeft = roomLeft > MinStrollRoomPx;
+                var canGoRight = roomRight > MinStrollRoomPx;
+
+                // Pick a direction with room to move, preferring left when both are open.
+                var goLeft = canGoLeft || !canGoRight;
+                if ((goLeft ? canGoLeft : canGoRight) && _controller.TryStartStroll(goLeft))
+                {
+                    _nextWalk = now.AddSeconds(Random.Shared.Next(2, 6));
+                }
+                else
+                {
+                    _nextWalk = now.AddSeconds(2);
+                }
             }
         }
+
         Pet.State = _controller.State;
-        Pet.FacingRight = _walkingRight;
+        Pet.FacingRight = false;
         Pet.Advance(elapsed.TotalSeconds);
         _tray?.Update(_controller.IsPaused, _controller.IsManualSleeping || _controller.IsAutoSleeping);
     }
@@ -201,13 +286,33 @@ public partial class PetWindow : Window
     private MonitorArea ToMonitorArea(Forms.Screen screen)
     {
         var area = screen.WorkingArea;
+        return ToMonitorArea(screen.DeviceName, area.Left, area.Top, area.Width, area.Height);
+    }
+
+    private MonitorArea ToMonitorArea(string deviceName, double left, double top, double width, double height)
+    {
+        var transform = CurrentDipTransform();
+        var dip = transform.ToDipRect(left, top, width, height);
+        return new MonitorArea(deviceName, dip.Left, dip.Top, dip.Width, dip.Height);
+    }
+
+    /// <summary>
+    /// The device-pixel to DIP transform for the monitor the window currently sits on.
+    /// </summary>
+    /// <remarks>
+    /// Known limitation, deliberately left as-is: this single transform is applied to *every*
+    /// monitor's rectangle. Strictly, each monitor in a mixed-DPI setup has its own scale factor,
+    /// which is why <see cref="DipTransform"/> exists and is unit-tested independently. Fixing the
+    /// window integration properly needs real mixed-DPI hardware to validate, because after the
+    /// window is moved onto a different-DPI monitor WPF re-interprets <c>Left</c>/<c>Top</c> in that
+    /// monitor's DIP space. Treat multi-monitor placement at differing scale factors as unverified.
+    /// </remarks>
+    private DipTransform CurrentDipTransform()
+    {
         var source = PresentationSource.FromVisual(this);
-        if (source?.CompositionTarget is null)
-            return new MonitorArea(screen.DeviceName, area.Left, area.Top, area.Width, area.Height);
+        if (source?.CompositionTarget is null) return DipTransform.Identity;
         var fromDevice = source.CompositionTarget.TransformFromDevice;
-        var topLeft = fromDevice.Transform(new WpfPoint(area.Left, area.Top));
-        var bottomRight = fromDevice.Transform(new WpfPoint(area.Right, area.Bottom));
-        return new MonitorArea(screen.DeviceName, topLeft.X, topLeft.Y, bottomRight.X - topLeft.X, bottomRight.Y - topLeft.Y);
+        return DipTransform.FromDeviceToDip(fromDevice.M11, fromDevice.M22);
     }
 
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(SnapToCurrentMonitor);
@@ -219,7 +324,11 @@ public partial class PetWindow : Window
         _timer.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         var monitor = CurrentMonitor();
-        _preferences.Save(new PetPreferences(monitor.Id, Left, _controller.IsPaused, _controller.IsManualSleeping));
+        _preferences.Save(new PetPreferences(monitor.Id, Left, _controller.IsPaused, _controller.IsManualSleeping)
+        {
+            LeftWalkSpeed = _leftWalkSpeed,
+            RightWalkSpeed = _rightWalkSpeed
+        });
         _tray?.Dispose();
     }
 }

@@ -40,12 +40,18 @@ top = 210 - subject.height - 2
 canvas.alpha_composite(subject, (left, top))
 
 OUT.mkdir(parents=True, exist_ok=True)
+# NOTE: this writes one frame per state into that state's folder, using the same cropped
+# photograph for all of them. It is a STARTING POINT only - every generated frame is the raw
+# photo, not finished art, and the committed repository deliberately has no such frames. Replace
+# each one before committing, and see src/DesktopPet/Assets/README.md for the layout rules.
 states = {"idle": 1, "walk_left": 1, "walk_right": 1, "respond": 1, "sleep": 1, "drag": 1}
-for prefix, count in states.items():
+for state, count in states.items():
+    folder = OUT / state
+    folder.mkdir(parents=True, exist_ok=True)
     for index in range(count):
         frame = canvas
-        if prefix == "walk_left":
+        if state == "walk_left":
             frame = canvas.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        frame.save(OUT / f"{prefix}_{index:02d}.png")
+        frame.save(folder / f"{index:03d}.png")
 
-print(f"Wrote {len(states)} photo-derived frames to {OUT}")
+print(f"Wrote {len(states)} photo-derived frames under {OUT} (one folder per state)")

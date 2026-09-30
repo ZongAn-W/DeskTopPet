@@ -6,15 +6,42 @@ namespace DesktopPet.Core.Tests;
 public sealed class PetControllerTests
 {
     [Fact]
-    public void Click_enters_response_and_returns_to_idle()
+    public void Click_plays_the_sigh_and_returns_to_idle()
     {
         var controller = new PetController();
 
         controller.Click();
 
-        Assert.Equal(PetState.Responding, controller.State);
-        controller.Advance(TimeSpan.FromMilliseconds(900));
+        Assert.Equal(PetState.Sighing, controller.State);
+        // The sigh is 122 frames at 30 fps, so it must still be running well past the old 800 ms.
+        controller.Advance(TimeSpan.FromSeconds(3));
+        Assert.Equal(PetState.Sighing, controller.State);
+        controller.Advance(TimeSpan.FromSeconds(1.2));
         Assert.Equal(PetState.Idle, controller.State);
+    }
+
+    [Fact]
+    public void Sigh_does_not_start_a_walk_and_blocks_one()
+    {
+        var controller = new PetController();
+        controller.Click();
+
+        controller.SetWalking(right: true);
+
+        Assert.Equal(PetState.Sighing, controller.State);
+    }
+
+    [Fact]
+    public void Walking_resumes_once_the_sigh_finishes()
+    {
+        var controller = new PetController();
+        controller.Click();
+        controller.Advance(TimeSpan.FromSeconds(5));
+        Assert.Equal(PetState.Idle, controller.State);
+
+        controller.SetWalking(right: true);
+
+        Assert.Equal(PetState.WalkingRight, controller.State);
     }
 
     [Fact]
@@ -53,7 +80,7 @@ public sealed class PetControllerTests
         controller.Click();
         Assert.Equal(PetState.Idle, controller.State);
         controller.Click();
-        Assert.Equal(PetState.Responding, controller.State);
+        Assert.Equal(PetState.Sighing, controller.State);
     }
 
     [Fact]

@@ -9,13 +9,15 @@
     <AssemblyName>DesktopPet</AssemblyName>
     <RootNamespace>DesktopPet</RootNamespace>
     <Platforms>AnyCPU</Platforms>
+    <!-- Character-derived icon, so the exe and any shortcut show the pet rather than the
+         generic .NET icon. Generated from the sprite art; see README. -->
+    <ApplicationIcon>Assets\DesktopPet.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\DesktopPet.Core\DesktopPet.Core.csproj" />
-    <Resource Include="Assets\Character\*.png" />
-    <!-- Kept in the repository as the source the idle frames were extracted from.
-         Deliberately NOT copied to the build output: it is 24.8 MB and nothing
-         reads it at runtime. Idle playback uses the embedded PNG frames. -->
-    <None Include="Assets\idle_blink.mov" />
+    <!-- One folder per animation; the folder name is the state prefix the loader looks for.
+         Recursive so adding a new state is just dropping in a folder. Assets\Character itself
+         holds only subfolders, so this cannot pick up loose stray images. -->
+    <Resource Include="Assets\Character\**\*.png" />
   </ItemGroup>
 </Project>

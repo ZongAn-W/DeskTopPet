@@ -80,8 +80,10 @@ tools/reference.png
 
 # Scratch frames extracted from the reference video while authoring the art.
 # Nothing in the app reads these, and they are regenerable from the video:
-#   frame.raw     raw RGBA dump (180 x 210 x 4 = 151,200 bytes)
+#   frame.raw     raw RGBA dump (640 x 640 x 4 = 1,638,400 bytes)
 #   mov_frame.png / sample.png   inspection stills
+# The files themselves were deleted; these rules stay so re-running the same
+# exploratory commands cannot pollute the tree again.
 *.raw
 tools/mov_frame.png
 tools/sample.png
@@ -92,12 +94,12 @@ tools/sample.png
 *.xcf
 *.blend*
 
-# Deliberately untracked, see README "Character frames".
-# This is the 24.8 MB reference clip the 122 idle frames were extracted from.
-# It stays on the author's disk and is never committed: it is the single largest
-# file in the project (about 99.9% of the repository size) and nothing reads it
-# at runtime. Re-create any frame with ffmpeg if you need to re-extract.
-src/DesktopPet/Assets/idle_blink.mov
+# Source clips the sprite frames were extracted from. Kept in the working copy so the art can be
+# regenerated, but never committed: they are ~83 MB together, about 92% of the working tree, and
+# nothing reads them at runtime. The frames derived from them are fully committed, so a clone
+# builds and runs without these. videos/README.md itself IS committed, so the folder and the
+# regeneration instructions survive a clone.
+videos/*.mov
 
 # --- Python tooling ---
 __pycache__/

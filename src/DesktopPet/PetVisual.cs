@@ -11,7 +11,19 @@ namespace DesktopPet;
 
 public sealed class PetVisual : FrameworkElement
 {
+    // Design canvas the sprite frames are authored on; also the vector placeholder's coordinate space.
+    public const double DesignWidth = 180;
+    public const double DesignHeight = 210;
+
+    // The clickable face region as fractions of the canvas. Derived from the original
+    // hard-coded 38,18,104,145 rectangle on the 180 x 210 canvas.
+    private const double FaceLeftFraction = 38.0 / DesignWidth;
+    private const double FaceTopFraction = 18.0 / DesignHeight;
+    private const double FaceWidthFraction = 104.0 / DesignWidth;
+    private const double FaceHeightFraction = 145.0 / DesignHeight;
+
     private double _phase;
+    private PetState _phaseState = PetState.Idle;
     private readonly SpriteAnimator _sprites = new();
     public PetState State { get; set; } = PetState.Idle;
     public bool FacingRight { get; set; } = true;
@@ -24,6 +36,15 @@ public sealed class PetVisual : FrameworkElement
 
     public void Advance(double seconds)
     {
+        // The animation clock is per state, not global. One ever-growing shared counter made a
+        // one-shot sequence compute a frame index far past its end, clamp to its final frame, and
+        // sit there for the whole phase — the turns and the walk-up/walk-down showed a single still.
+        // Only the looping walk appeared to work, because wrapping hid the fault.
+        if (State != _phaseState)
+        {
+            _phaseState = State;
+            _phase = 0;
+        }
         _phase += seconds;
         InvalidateVisual();
     }
@@ -31,15 +52,30 @@ public sealed class PetVisual : FrameworkElement
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
     {
         var point = hitTestParameters.HitPoint;
-        var face = new Rect(38, 18, 104, 145);
-        return face.Contains(point) ? new PointHitTestResult(this, point) : null;
+        return FaceRect().Contains(point) ? new PointHitTestResult(this, point) : null;
+    }
+
+    /// <summary>
+    /// The clickable face region, expressed as fractions of the current render size so it
+    /// stays correct if the window is ever resized. Falls back to the design canvas
+    /// (180 x 210) before the first layout pass, when ActualWidth/Height are still zero.
+    /// </summary>
+    public Rect FaceRect()
+    {
+        var width = ActualWidth > 0 ? ActualWidth : DesignWidth;
+        var height = ActualHeight > 0 ? ActualHeight : DesignHeight;
+        return new Rect(
+            width * FaceLeftFraction,
+            height * FaceTopFraction,
+            width * FaceWidthFraction,
+            height * FaceHeightFraction);
     }
 
     protected override void OnRender(DrawingContext dc)
     {
-        if (_sprites.HasFrames)
+        if (_sprites.HasFramesFor(State))
         {
-            dc.DrawImage(_sprites.Frame(State, _phase), new Rect(0, 0, 180, 210));
+            dc.DrawImage(_sprites.Frame(State, _phase), new Rect(0, 0, DesignWidth, DesignHeight));
             return;
         }
         var breath = State == PetState.Sleeping ? 1.5 : Math.Sin(_phase * 3.4) * 1.5;
