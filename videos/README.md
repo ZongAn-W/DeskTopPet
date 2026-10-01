@@ -79,10 +79,12 @@ README for the measured timeline.
 
 ## Why these are not in git
 
-Together they are about **113 MB**, roughly 93% of the working tree. Nothing reads them at runtime —
-the app embeds the derived PNG frames — so committing them would make every clone pay for data it
-never uses. `.gitignore` excludes `videos/*.mov` (and `*.mov` generally). This README itself **is**
-committed, so the folder and these instructions survive a clone even though the clips do not.
+Together they are about **113 MB**, roughly 93% of the working tree, so the source clips remain
+ignored rather than committed. `.gitignore` excludes `videos/*.mov` (and `*.mov` generally). This
+README itself **is** committed, so the folder and these instructions survive a clone even though the
+clips do not.
 
-The committed PNG frames are complete and self-sufficient: a fresh clone builds and runs without any
-of these files.
+The committed PNG frames remain the fallback: a fresh clone builds and runs without these files or
+FFmpeg. To enable runtime video playback, `publish.ps1` copies these clips to `Assets/Video` beside
+the executable when they are present. FFmpeg is a separate dependency and is not bundled by the
+publish script.

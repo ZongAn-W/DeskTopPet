@@ -4,8 +4,7 @@ using Xunit;
 namespace DesktopPet.Core.Tests;
 
 /// <summary>
-/// The five-phase leftward stroll. Only the two turns are acted in place; the walk-up, the walk
-/// cycle and the walk-down all travel.
+/// The three-phase leftward stroll: fixed opening clip, travelling middle clip, fixed closing clip.
 /// </summary>
 public sealed class StrollSequenceTests
 {
@@ -38,7 +37,7 @@ public sealed class StrollSequenceTests
     }
 
     [Fact]
-    public void A_stroll_runs_through_all_five_phases_in_order()
+    public void A_stroll_runs_through_the_three_phases_in_order()
     {
         var controller = StartStrolling();
         var seen = new List<StrollPhase> { controller.Phase };
@@ -54,15 +53,13 @@ public sealed class StrollSequenceTests
         Assert.Equal(
             new[]
             {
-                StrollPhase.TurningLeft, StrollPhase.Starting, StrollPhase.Walking,
-                StrollPhase.Stopping, StrollPhase.TurningBack, StrollPhase.None
+                StrollPhase.TurningLeft, StrollPhase.Walking, StrollPhase.TurningBack, StrollPhase.None
             },
             seen);
     }
 
     [Theory]
     [InlineData(StrollPhase.TurningLeft)]
-    [InlineData(StrollPhase.Stopping)]
     [InlineData(StrollPhase.TurningBack)]
     public void The_turns_and_the_walk_down_are_acted_in_place(StrollPhase phase)
     {
@@ -74,9 +71,8 @@ public sealed class StrollSequenceTests
     }
 
     [Theory]
-    [InlineData(StrollPhase.Starting)]
     [InlineData(StrollPhase.Walking)]
-    public void The_two_travelling_phases_move_the_pet(StrollPhase phase)
+    public void The_travelling_phase_moves_the_pet(StrollPhase phase)
     {
         var controller = StartStrolling();
         while (controller.Phase != phase) controller.Advance(TimeSpan.FromMilliseconds(50));
@@ -96,10 +92,8 @@ public sealed class StrollSequenceTests
             controller.Advance(tick);
         }
 
-        Assert.True(moving[StrollPhase.Starting]);
         Assert.True(moving[StrollPhase.Walking]);
         Assert.False(moving[StrollPhase.TurningLeft]);
-        Assert.False(moving[StrollPhase.Stopping]);
         Assert.False(moving[StrollPhase.TurningBack]);
     }
 
@@ -107,13 +101,14 @@ public sealed class StrollSequenceTests
     [InlineData(1)]
     [InlineData(3)]
     [InlineData(5)]
-    public void Walk_repeat_count_scales_the_walking_phase_and_the_total(int repeats)
+    public void Walk_repeat_count_does_not_repeat_the_walking_clip(int repeats)
     {
         var controller = StartStrolling(repeats);
 
-        AssertClose(Frames(66 + 62 + repeats * 93 + 32 + 57), controller.StrollDuration);
+        AssertClose(Frames(29 + 175 + 94), controller.StrollDuration);
 
-        // Measure the travelling window by ticking through the stroll: the walk-up plus the repeats.
+        // Measure the travelling window by ticking through the stroll. The legacy setting remains
+        // accepted for compatibility, but the supplied walking video is a single complete pass.
         var moving = TimeSpan.Zero;
         var tick = TimeSpan.FromMilliseconds(50);
         for (var i = 0; i < 4000 && controller.IsStrolling; i++)
@@ -122,16 +117,14 @@ public sealed class StrollSequenceTests
             controller.Advance(tick);
         }
 
-        var expected = TimeSpan.FromSeconds((62 + repeats * 93) / 30.0);
+        var expected = TimeSpan.FromSeconds(175 / 30.0);
         Assert.True(Math.Abs((moving - expected).TotalSeconds) <= 0.1,
             $"travelling window was {moving.TotalSeconds:F2}s, expected about {expected.TotalSeconds:F2}s");
     }
 
     [Fact]
-    public void Repeating_the_walk_cycle_still_increases_the_travel_distance()
+    public void Legacy_repeat_settings_produce_the_same_travel_distance()
     {
-        // The pet moves at a fixed speed for the whole travelling window, so distance grows with the
-        // repeat count. The walk-up adds a constant on top, so this is an increase, not a doubling.
         static double TravelSeconds(int repeats)
         {
             var c = StartStrolling(repeats);
@@ -149,11 +142,8 @@ public sealed class StrollSequenceTests
         var twice = TravelSeconds(2);
         var four = TravelSeconds(4);
 
-        Assert.True(twice > once, $"1x={once:F2}s 2x={twice:F2}s");
-        Assert.True(four > twice, $"2x={twice:F2}s 4x={four:F2}s");
-        // One extra cycle is worth exactly one walk cycle of travel, whatever the fixed overhead is.
-        Assert.True(Math.Abs((twice - once) - 93 / 30.0) < 0.1, $"step was {twice - once:F2}s");
-        Assert.True(Math.Abs((four - twice) - 2 * 93 / 30.0) < 0.1, $"step was {four - twice:F2}s");
+        Assert.Equal(once, twice, precision: 1);
+        Assert.Equal(once, four, precision: 1);
     }
 
     [Fact]
@@ -255,9 +245,7 @@ public sealed class StrollSequenceTests
         }
 
         Assert.Equal(PetState.TurningLeft, map[StrollPhase.TurningLeft]);
-        Assert.Equal(PetState.WalkStarting, map[StrollPhase.Starting]);
         Assert.Equal(PetState.WalkingLeft, map[StrollPhase.Walking]);
-        Assert.Equal(PetState.WalkStopping, map[StrollPhase.Stopping]);
         Assert.Equal(PetState.TurningBack, map[StrollPhase.TurningBack]);
     }
 

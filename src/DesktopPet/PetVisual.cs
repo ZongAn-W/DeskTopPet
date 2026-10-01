@@ -1,11 +1,10 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using DesktopPet.Core;
 using Point = System.Windows.Point;
-using Pen = System.Windows.Media.Pen;
-using WpfColor = System.Windows.Media.Color;
-using WpfSize = System.Windows.Size;
 
 namespace DesktopPet;
 
@@ -23,10 +22,47 @@ public sealed class PetVisual : FrameworkElement
     private const double FaceHeightFraction = 145.0 / DesignHeight;
 
     private double _phase;
-    private PetState _phaseState = PetState.Idle;
-    private readonly SpriteAnimator _sprites = new();
+    private PetState? _phaseState;
+    private readonly CancellationTokenSource _lifetime = new();
+    private CancellationTokenSource? _videoCancellation;
+    private IReadOnlyList<BitmapSource> _videoFrames = Array.Empty<BitmapSource>();
+    private BitmapSource? _displayFrame;
+    private Task<IReadOnlyList<BitmapSource>>? _videoLoad;
+    private PetState _videoFrameState;
+    private bool _waitingForVideo;
+    private bool _externalAnimationActive;
+    private bool _externalAnimationReady;
+    private double _externalPhase;
+    private bool _externalCompletionQueued;
+    private Action? _externalAnimationCompleted;
     public PetState State { get; set; } = PetState.Idle;
     public bool FacingRight { get; set; } = true;
+    public bool IsUsingVideo => _videoFrames.Count > 0;
+
+    public void BeginExternalAnimation(string fileName, Action? completed = null)
+    {
+        _externalAnimationActive = true;
+        _externalAnimationReady = false;
+        _externalPhase = 0;
+        _externalCompletionQueued = false;
+        _externalAnimationCompleted = completed;
+        _videoFrames = Array.Empty<BitmapSource>();
+        _waitingForVideo = true;
+        _videoCancellation?.Cancel();
+        _videoCancellation?.Dispose();
+        _videoCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _videoCancellation.Token;
+        _videoLoad = VideoFrameDecoder.LoadFileAsync(fileName, token, firstFrame =>
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (!_externalAnimationActive || _externalAnimationReady || token.IsCancellationRequested) return;
+                _videoFrames = [firstFrame];
+                _waitingForVideo = false;
+                InvalidateVisual();
+            })));
+        _ = _videoLoad.ContinueWith(_ => Dispatcher.BeginInvoke(new Action(InvalidateVisual)),
+            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+    }
 
     public PetVisual()
     {
@@ -36,6 +72,43 @@ public sealed class PetVisual : FrameworkElement
 
     public void Advance(double seconds)
     {
+        if (_externalAnimationActive)
+        {
+            if (_videoLoad is { IsCompleted: true } externalLoad)
+            {
+                _videoLoad = null;
+                if (externalLoad.Status == TaskStatus.RanToCompletion && externalLoad.Result.Count > 0)
+                {
+                    _videoFrames = externalLoad.Result;
+                    _externalAnimationReady = true;
+                    _externalPhase = 0;
+                    _waitingForVideo = false;
+                }
+                else
+                {
+                    _ = externalLoad.Exception;
+                    CompleteExternalAnimation();
+                    return;
+                }
+            }
+
+            if (_externalAnimationReady)
+            {
+                _externalPhase += Math.Max(0, seconds);
+                var duration = _videoFrames.Count / 30.0;
+                if (_externalPhase >= duration && !_externalCompletionQueued)
+                {
+                    _externalCompletionQueued = true;
+                    Dispatcher.BeginInvoke(
+                        DispatcherPriority.ApplicationIdle,
+                        new Action(CompleteExternalAnimation));
+                }
+            }
+
+            InvalidateVisual();
+            return;
+        }
+
         // The animation clock is per state, not global. One ever-growing shared counter made a
         // one-shot sequence compute a frame index far past its end, clamp to its final frame, and
         // sit there for the whole phase — the turns and the walk-up/walk-down showed a single still.
@@ -43,10 +116,70 @@ public sealed class PetVisual : FrameworkElement
         if (State != _phaseState)
         {
             _phaseState = State;
-            _phase = 0;
+            // Hold the previous clip's last rendered frame while the next clip decodes. The left
+            // walk clips intentionally hand off through matching poses, so this avoids a transparent
+            // gap without showing a partially decoded frame.
+            _videoFrames = Array.Empty<BitmapSource>();
+            _waitingForVideo = true;
+            BeginVideoLoad(State);
         }
-        _phase += seconds;
+        if (_videoLoad is { IsCompletedSuccessfully: true } load && load.Result.Count > 0)
+        {
+            _videoFrames = load.Result;
+            _videoFrameState = State;
+            _videoLoad = null;
+            _phase = 0;
+            _waitingForVideo = false;
+            var completed = _externalAnimationCompleted;
+            _externalAnimationCompleted = null;
+            if (completed is not null)
+                Dispatcher.BeginInvoke(completed);
+            // Let the first frame render for a complete tick before consuming elapsed time. This
+            // makes the handoff deterministic even when decoding finishes between render callbacks.
+            InvalidateVisual();
+            return;
+        }
+        else if (_videoLoad is { IsCompleted: true })
+        {
+            _videoLoad = null;
+            _videoFrames = Array.Empty<BitmapSource>();
+            _displayFrame = null;
+            _waitingForVideo = false;
+        }
+        if (!_waitingForVideo)
+            _phase += seconds;
         InvalidateVisual();
+    }
+
+    private void CompleteExternalAnimation()
+    {
+        if (!_externalAnimationActive) return;
+        _externalAnimationActive = false;
+        _externalAnimationReady = false;
+        _externalCompletionQueued = false;
+        var completed = _externalAnimationCompleted;
+        _externalAnimationCompleted = null;
+        if (completed is not null)
+            completed();
+        else
+        {
+            _phaseState = State;
+            _phase = 0;
+            _waitingForVideo = true;
+            BeginVideoLoad(State);
+        }
+        InvalidateVisual();
+    }
+
+    private void BeginVideoLoad(PetState state)
+    {
+        _videoCancellation?.Cancel();
+        _videoCancellation?.Dispose();
+        _videoCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _videoLoad = VideoFrameDecoder.LoadAsync(state, _videoCancellation.Token);
+        var load = _videoLoad;
+        _ = load.ContinueWith(_ => Dispatcher.BeginInvoke(new Action(InvalidateVisual)),
+            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
     }
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
@@ -73,86 +206,35 @@ public sealed class PetVisual : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
-        if (_sprites.HasFramesFor(State))
+        if (_waitingForVideo)
         {
-            dc.DrawImage(_sprites.Frame(State, _phase), new Rect(0, 0, DesignWidth, DesignHeight));
+            if (_displayFrame is not null)
+                dc.DrawImage(_displayFrame, new Rect(0, 0, DesignWidth, DesignHeight));
             return;
         }
-        var breath = State == PetState.Sleeping ? 1.5 : Math.Sin(_phase * 3.4) * 1.5;
-        var sleeping = State == PetState.Sleeping;
-        var responding = State == PetState.Responding;
-        var walk = State is PetState.WalkingLeft or PetState.WalkingRight ? Math.Sin(_phase * 10) * 3 : 0;
-        var hair = new SolidColorBrush(WpfColor.FromRgb(24, 27, 33));
-        var hairLight = new SolidColorBrush(WpfColor.FromRgb(43, 48, 57));
-        var skin = new SolidColorBrush(WpfColor.FromRgb(248, 220, 205));
-        var top = new SolidColorBrush(WpfColor.FromRgb(237, 238, 230));
-        var topEdge = new SolidColorBrush(WpfColor.FromRgb(195, 202, 190));
-        var shoe = new SolidColorBrush(WpfColor.FromRgb(45, 45, 53));
-
-        dc.PushTransform(new TranslateTransform(FacingRight ? 0 : 180, breath + walk));
-        if (!FacingRight) dc.PushTransform(new ScaleTransform(-1, 1));
-
-        // Long, center-parted hair is the strongest silhouette cue from the reference photo.
-        dc.DrawEllipse(hair, null, new Point(90, 80), 61, 82);
-        dc.DrawEllipse(skin, null, new Point(90, 68), 41, 47);
-        dc.DrawGeometry(hair, null, PathGeometry("M 90,22 C 70,18 45,33 34,65 C 27,87 31,132 43,166 C 48,178 58,184 64,174 C 58,135 60,91 72,59 C 78,45 84,36 90,22 Z"));
-        dc.DrawGeometry(hair, null, PathGeometry("M 90,22 C 111,18 136,34 147,67 C 154,91 151,136 138,171 C 133,182 123,185 117,174 C 123,135 121,92 109,59 C 103,44 96,35 90,22 Z"));
-        dc.DrawGeometry(hairLight, null, PathGeometry("M 89,23 C 78,29 71,40 67,54 C 77,46 84,38 90,29 Z"));
-        dc.DrawGeometry(hairLight, null, PathGeometry("M 92,23 C 104,29 111,40 115,54 C 105,46 98,38 92,29 Z"));
-
-        // Sleeveless light top and exposed arms echo the reference silhouette.
-        dc.DrawRoundedRectangle(top, null, new Rect(49, 108, 82, 70), 22, 22);
-        dc.DrawLine(new Pen(topEdge, 2), new Point(68, 111), new Point(76, 126));
-        dc.DrawLine(new Pen(topEdge, 2), new Point(112, 111), new Point(104, 126));
-        dc.DrawLine(new Pen(topEdge, 1), new Point(76, 145), new Point(104, 145));
-        dc.DrawRoundedRectangle(shoe, null, new Rect(48, 174, 33, 14), 7, 7);
-        dc.DrawRoundedRectangle(shoe, null, new Rect(99, 174, 33, 14), 7, 7);
-
-        var eyePen = new Pen(new SolidColorBrush(WpfColor.FromRgb(55, 48, 55)), 2.1);
-        if (sleeping)
+        if (_videoFrames.Count > 0)
         {
-            dc.DrawLine(eyePen, new Point(67, 71), new Point(77, 73));
-            dc.DrawLine(eyePen, new Point(103, 73), new Point(113, 71));
+            var frameIndex = _externalAnimationActive
+                ? _externalAnimationReady
+                    ? AnimationTiming.OneShotFrameIndex(_videoFrames.Count, _externalPhase, 30)
+                    : 0
+                    : AnimationTiming.FrameIndex(_videoFrameState, _videoFrames.Count, _phase);
+            _displayFrame = _videoFrames[frameIndex];
+            dc.DrawImage(_displayFrame,
+                new Rect(0, 0, DesignWidth, DesignHeight));
+            return;
         }
-        else if (Math.Sin(_phase * 4.8) > 0.86)
-        {
-            dc.DrawLine(eyePen, new Point(67, 72), new Point(77, 72));
-            dc.DrawLine(eyePen, new Point(103, 72), new Point(113, 72));
-        }
-        else
-        {
-            dc.DrawEllipse(eyePen.Brush, null, new Point(73, 71), 2.7, 3.5);
-            dc.DrawEllipse(eyePen.Brush, null, new Point(107, 71), 2.7, 3.5);
-        }
-        dc.DrawLine(new Pen(new SolidColorBrush(WpfColor.FromRgb(206, 175, 166)), 1), new Point(90, 76), new Point(89, 82));
-        var mouthPen = new Pen(new SolidColorBrush(WpfColor.FromRgb(163, 99, 108)), 1.6);
-        if (responding)
-            dc.DrawArc(mouthPen, new Point(82, 87), new Point(98, 87), false, true);
-        else
-            dc.DrawLine(mouthPen, new Point(87, 87), new Point(93, 87));
-        if (responding)
-        {
-            var handPen = new Pen(skin, 8) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-            dc.DrawLine(handPen, new Point(124, 126), new Point(147, 105 + Math.Sin(_phase * 12) * 4));
-        }
-
-        if (!FacingRight) dc.Pop();
-        dc.Pop();
+        // Video is the only animation source. A missing clip leaves the transparent canvas empty.
     }
 
-    private static Geometry PathGeometry(string data) => Geometry.Parse(data);
-}
-
-internal static class DrawingExtensions
-{
-    public static void DrawArc(this DrawingContext dc, Pen pen, Point start, Point end, bool isLargeArc, bool sweepDirection)
+    protected override void OnVisualParentChanged(DependencyObject oldParent)
     {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+        if (Parent is null)
         {
-            context.BeginFigure(start, false, false);
-            context.ArcTo(end, new WpfSize(9, 7), 0, isLargeArc, sweepDirection ? SweepDirection.Clockwise : SweepDirection.Counterclockwise, true, false);
+            _lifetime.Cancel();
+            _videoCancellation?.Cancel();
         }
-        dc.DrawGeometry(null, pen, geometry);
+        base.OnVisualParentChanged(oldParent);
     }
+
 }

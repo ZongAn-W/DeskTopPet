@@ -17,11 +17,13 @@ public sealed class PetController
     // counts must stay in step with the art in Assets/Character; a mismatch shows up as the pet
     // snapping back to idle mid-animation, or standing frozen on a held final frame.
 
-    private const int TurnLeftFrames = 66;   // turn_left
-    private const int WalkStartFrames = 62;  // walk_start
-    private const int WalkCycleFrames = 93;  // walk_left, one repetition
-    private const int WalkStopFrames = 32;   // walk_stop
-    private const int TurnBackFrames = 57;   // turn_back
+    // The supplied left-walk videos are played as three phases. These counts match the decoder's
+    // boundary trim: one duplicate hold frame is removed from each clip where it occurs.
+    private const int TurnLeftFrames = 29;   // left-walk-1.mov, fixed position
+    private const int WalkStartFrames = 0;   // unused with the three-clip set
+    private const int WalkCycleFrames = 175; // left-walk-2.mov, moving
+    private const int WalkStopFrames = 0;    // unused with the three-clip set
+    private const int TurnBackFrames = 94;   // left-walk-3.mov, fixed position
 
     // Rightward. WalkRight is a one-shot: it already ends facing the viewer, so it is never repeated.
     private const int TurnRightFrames = 95;  // turn_right
@@ -40,9 +42,8 @@ public sealed class PetController
     }
 
     /// <summary>
-    /// How many times the walk cycle is played per stroll. This is the single knob for how far the
-    /// pet travels: distance = repeat count x one cycle. The pet moves at a constant speed while
-    /// <see cref="StrollPhase.Walking"/>, so doubling this doubles the distance.
+    /// Retained for settings and test compatibility. The supplied middle walk clip is a complete
+    /// one-shot, so the value no longer repeats the video.
     /// </summary>
     public const int DefaultStrollRepeatCount = 2;
 
@@ -58,7 +59,7 @@ public sealed class PetController
 
     public bool IsStrolling => Phase != StrollPhase.None;
 
-    /// <summary>True while a stroll is heading left, which is the direction with a repeat knob.</summary>
+    /// <summary>True while a stroll is heading left.</summary>
     public bool IsStrollingLeft => Phase
         is StrollPhase.TurningLeft or StrollPhase.Starting or StrollPhase.Walking
         or StrollPhase.Stopping or StrollPhase.TurningBack;
@@ -80,12 +81,11 @@ public sealed class PetController
         or StrollPhase.WalkingRight;
 
     /// <summary>One repetition of the leftward walk cycle.</summary>
-    private TimeSpan OneWalkCycle => Frames(WalkCycleFrames * Math.Max(1, StrollRepeatCount));
+    private TimeSpan OneWalkCycle => Frames(WalkCycleFrames);
 
     /// <summary>Total wall-clock length of one complete leftward stroll.</summary>
     public TimeSpan StrollDuration =>
-        Frames(TurnLeftFrames) + Frames(WalkStartFrames) + OneWalkCycle
-        + Frames(WalkStopFrames) + Frames(TurnBackFrames);
+        Frames(TurnLeftFrames) + OneWalkCycle + Frames(TurnBackFrames);
 
     /// <summary>
     /// Total wall-clock length of one complete rightward stroll. It has no repeat knob: the walk
@@ -106,9 +106,9 @@ public sealed class PetController
     private TimeSpan PhaseDurationOf(StrollPhase phase) => phase switch
     {
         StrollPhase.TurningLeft => Frames(TurnLeftFrames),
-        StrollPhase.Starting => Frames(WalkStartFrames),
+        StrollPhase.Starting => TimeSpan.Zero,
         StrollPhase.Walking => OneWalkCycle,
-        StrollPhase.Stopping => Frames(WalkStopFrames),
+        StrollPhase.Stopping => TimeSpan.Zero,
         StrollPhase.TurningBack => Frames(TurnBackFrames),
         StrollPhase.TurningRight => Frames(TurnRightFrames),
         StrollPhase.WalkingRight => Frames(WalkRightFrames),
@@ -119,9 +119,9 @@ public sealed class PetController
     /// <summary>The phase that follows <paramref name="phase"/>, or None when the stroll is over.</summary>
     private static StrollPhase NextPhase(StrollPhase phase) => phase switch
     {
-        StrollPhase.TurningLeft => StrollPhase.Starting,
+        StrollPhase.TurningLeft => StrollPhase.Walking,
         StrollPhase.Starting => StrollPhase.Walking,
-        StrollPhase.Walking => StrollPhase.Stopping,
+        StrollPhase.Walking => StrollPhase.TurningBack,
         StrollPhase.Stopping => StrollPhase.TurningBack,
         StrollPhase.TurningRight => StrollPhase.WalkingRight,
         StrollPhase.WalkingRight => StrollPhase.StandingRight,
@@ -134,8 +134,8 @@ public sealed class PetController
 
     /// <summary>
     /// Begins a stroll: turning to face the direction, walking, and coming back to face the viewer.
-    /// A leftward stroll repeats its walk cycle <see cref="StrollRepeatCount"/> times; a rightward one
-    /// is a single fixed pass. Returns false when a stroll cannot start (asleep, paused, being
+    /// The leftward walk clip is played once; a rightward one is also a single fixed pass. Returns
+    /// false when a stroll cannot start (asleep, paused, being
     /// dragged, already strolling, or a zero repeat count on the left).
     /// </summary>
     public bool TryStartStroll(bool goLeft = true)

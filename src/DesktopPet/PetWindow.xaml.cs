@@ -40,12 +40,15 @@ public partial class PetWindow : Window
     private readonly DispatcherTimer _timer;
     private TrayController? _tray;
     private DateTime _lastTick = DateTime.UtcNow;
-    private DateTime _nextWalk = DateTime.UtcNow.AddSeconds(2);
+    private TimeSpan? _lastRenderingTime;
+    private DateTime _nextWalk = DateTime.MaxValue;
+    private bool _wasStrolling;
     private WpfPoint _pressPoint;
     private double _pressLeft;
     private double _pressTop;
     private bool _dragging;
     private bool _closing;
+    private bool _exitAnimationStarted;
 
     public PetWindow()
     {
@@ -70,6 +73,8 @@ public partial class PetWindow : Window
         _rightWalkSpeed = WalkSpeedOptions.Normalize(saved.RightWalkSpeed);
         UpdateSpeedMenus();
         PlaceFromPreferences(saved);
+        _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+        _wasStrolling = false;
         try
         {
             _tray = new TrayController();
@@ -79,6 +84,9 @@ public partial class PetWindow : Window
             _tray.Update(_controller.IsPaused, _controller.IsManualSleeping);
         }
         catch { _tray = null; }
+        Pet.BeginExternalAnimation("appear.mov");
+        _lastRenderingTime = null;
+        CompositionTarget.Rendering += OnRendering;
         _timer.Start();
     }
 
@@ -94,17 +102,20 @@ public partial class PetWindow : Window
         _rightSpeedMenu = CreateSpeedMenu("右向速度", goLeft: false);
         speed.Items.Add(_leftSpeedMenu);
         speed.Items.Add(_rightSpeedMenu);
+        var videoStatus = new MenuItem { Header = "动画源：加载中", IsEnabled = false };
         var exit = new MenuItem { Header = "退出" };
         exit.Click += (_, _) => Close();
         menu.Items.Add(pause);
         menu.Items.Add(sleep);
         menu.Items.Add(speed);
+        menu.Items.Add(videoStatus);
         menu.Items.Add(new Separator());
         menu.Items.Add(exit);
         menu.Opened += (_, _) =>
         {
             pause.Header = _controller.IsPaused ? "继续走动" : "暂停走动";
             sleep.Header = _controller.IsManualSleeping || _controller.IsAutoSleeping ? "唤醒" : "睡觉";
+            videoStatus.Header = Pet.IsUsingVideo ? "动画源：视频" : "动画源：视频不可用";
             UpdateSpeedMenus();
         };
         return menu;
@@ -154,13 +165,16 @@ public partial class PetWindow : Window
         var elapsed = now - _lastTick;
         _lastTick = now;
         _controller.Advance(elapsed);
+        if (_wasStrolling && !_controller.IsStrolling)
+            _nextWalk = StrollSchedule.NextWalkTime(now, Random.Shared);
+        _wasStrolling = _controller.IsStrolling;
 
         if (!_dragging && !_controller.IsPaused)
         {
             var area = CurrentMonitor().WorkingArea;
 
-            // The sprite sequences decide travel, not this loop. Leftward the walk-up and the walk
-            // cycle travel while the turns and the walk-down are acted in place; rightward only the
+            // The sprite sequences decide travel, not this loop. Leftward only the middle walk clip
+            // travels; the opening and closing clips are acted in place. Rightward only the
             // walk module travels while the opening turn and final settle are acted in place.
             if (_controller.IsMoving)
             {
@@ -186,11 +200,7 @@ public partial class PetWindow : Window
 
                 // Pick a direction with room to move, preferring left when both are open.
                 var goLeft = canGoLeft || !canGoRight;
-                if ((goLeft ? canGoLeft : canGoRight) && _controller.TryStartStroll(goLeft))
-                {
-                    _nextWalk = now.AddSeconds(Random.Shared.Next(2, 6));
-                }
-                else
+                if (!((goLeft ? canGoLeft : canGoRight) && _controller.TryStartStroll(goLeft)))
                 {
                     _nextWalk = now.AddSeconds(2);
                 }
@@ -199,8 +209,17 @@ public partial class PetWindow : Window
 
         Pet.State = _controller.State;
         Pet.FacingRight = false;
-        Pet.Advance(elapsed.TotalSeconds);
         _tray?.Update(_controller.IsPaused, _controller.IsManualSleeping || _controller.IsAutoSleeping);
+    }
+
+    private void OnRendering(object? sender, EventArgs e)
+    {
+        if (e is not RenderingEventArgs rendering) return;
+        var elapsed = _lastRenderingTime is { } previous
+            ? rendering.RenderingTime - previous
+            : TimeSpan.Zero;
+        _lastRenderingTime = rendering.RenderingTime;
+        Pet.Advance(Math.Max(0, elapsed.TotalSeconds));
     }
 
 
@@ -320,7 +339,15 @@ public partial class PetWindow : Window
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_closing) return;
+        if (!_exitAnimationStarted)
+        {
+            e.Cancel = true;
+            _exitAnimationStarted = true;
+            Pet.BeginExternalAnimation("disappear.mov", CloseAfterExitAnimation);
+            return;
+        }
         _closing = true;
+        CompositionTarget.Rendering -= OnRendering;
         _timer.Stop();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         var monitor = CurrentMonitor();
@@ -330,5 +357,10 @@ public partial class PetWindow : Window
             RightWalkSpeed = _rightWalkSpeed
         });
         _tray?.Dispose();
+    }
+
+    private void CloseAfterExitAnimation()
+    {
+        Close();
     }
 }

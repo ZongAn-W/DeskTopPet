@@ -23,6 +23,7 @@ public sealed class SpritePlaybackTests
     [InlineData(PetState.WalkStarting, 62)]
     [InlineData(PetState.WalkStopping, 32)]
     [InlineData(PetState.TurningBack, 57)]
+    [InlineData(PetState.WalkingLeft, 175)]
     [InlineData(PetState.Sighing, 122)]
     public void A_one_shot_sequence_holds_its_final_frame(PetState state, int frameCount)
     {
@@ -42,12 +43,14 @@ public sealed class SpritePlaybackTests
     [InlineData(PetState.WalkStarting, 62)]
     [InlineData(PetState.WalkStopping, 32)]
     [InlineData(PetState.TurningBack, 57)]
+    [InlineData(PetState.WalkingLeft, 175)]
     public void A_one_shot_sequence_actually_advances_through_its_frames(PetState state, int frameCount)
     {
         // Walk the clock across the sequence and confirm every frame index is reached. This is what
         // "the animation plays" means, and what a stuck clock would fail.
         var seen = new HashSet<int>();
-        for (var f = 0; f < frameCount; f++) seen.Add(AnimationTiming.FrameIndex(state, frameCount, Frames(f)));
+        for (var f = 0; f < frameCount; f++)
+            seen.Add(AnimationTiming.FrameIndex(state, frameCount, Frames(f) + 0.0001));
 
         Assert.Equal(frameCount, seen.Count);
         Assert.Equal(0, AnimationTiming.FrameIndex(state, frameCount, 0));
@@ -75,7 +78,7 @@ public sealed class SpritePlaybackTests
 
     [Theory]
     [InlineData(PetState.Idle, true)]
-    [InlineData(PetState.WalkingLeft, true)]
+    [InlineData(PetState.WalkingLeft, false)]
     [InlineData(PetState.Sleeping, true)]
     [InlineData(PetState.Sighing, false)]
     [InlineData(PetState.TurningLeft, false)]
@@ -116,12 +119,21 @@ public sealed class SpritePlaybackTests
 
         // A sequence's duration is what the controller schedules against.
         Assert.Equal(66 / 30.0, AnimationTiming.Duration(PetState.TurningLeft, 66), 6);
-        Assert.Equal(93 / 30.0, AnimationTiming.Duration(PetState.WalkingLeft, 93), 6);
+        Assert.Equal(175 / 30.0, AnimationTiming.Duration(PetState.WalkingLeft, 175), 6);
     }
 
     [Fact]
     public void An_empty_sequence_reports_no_frame_rather_than_throwing()
     {
         Assert.Equal(-1, AnimationTiming.FrameIndex(PetState.Dragging, 0, 0));
+    }
+
+    [Fact]
+    public void An_external_video_sequence_uses_its_own_frame_rate_and_holds_final_frame()
+    {
+        Assert.Equal(0, AnimationTiming.OneShotFrameIndex(97, 0, 30));
+        Assert.Equal(1, AnimationTiming.OneShotFrameIndex(97, 1 / 30.0, 30));
+        Assert.Equal(96, AnimationTiming.OneShotFrameIndex(97, 96 / 30.0, 30));
+        Assert.Equal(96, AnimationTiming.OneShotFrameIndex(97, 10, 30));
     }
 }

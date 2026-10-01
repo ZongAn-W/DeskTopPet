@@ -31,7 +31,7 @@ public enum StrollPhase
 {
     None,
 
-    // Leftward: turn out, walk up to speed, walk (repeatable), walk down, turn back to the viewer.
+    // Leftward: turn out, play the supplied walking pass once, then turn back to the viewer.
     TurningLeft,
     Starting,
     Walking,

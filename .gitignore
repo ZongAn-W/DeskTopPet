@@ -95,8 +95,8 @@ tools/sample.png
 *.blend*
 
 # Source clips the sprite frames were extracted from. Kept in the working copy so the art can be
-# regenerated, but never committed: they are ~83 MB together, about 92% of the working tree, and
-# nothing reads them at runtime. The frames derived from them are fully committed, so a clone
+# regenerated, but never committed: they are large and machine-specific. Published videos may be
+# copied from the working tree; the frames are also committed, so a clone
 # builds and runs without these. videos/README.md itself IS committed, so the folder and the
 # regeneration instructions survive a clone.
 videos/*.mov

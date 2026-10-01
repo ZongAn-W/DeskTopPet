@@ -23,7 +23,9 @@ public static class AnimationTiming
     public static bool Loops(PetState state) => state switch
     {
         PetState.Idle => true,
-        PetState.WalkingLeft => true,
+        // The supplied left-walk middle clip is one complete pass. Replaying it would visibly
+        // jump back to its first pose before the closing clip begins.
+        PetState.WalkingLeft => false,
         PetState.Sleeping => true,
         // WalkingRight is a one-shot: the clip already ends facing the viewer, so it must not wrap.
         _ => false
@@ -56,6 +58,14 @@ public static class AnimationTiming
         if (frameCount <= 0) return -1;
         var index = (int)(seconds * FrameRateFor(state));
         return Loops(state) ? index % frameCount : Math.Clamp(index, 0, frameCount - 1);
+    }
+
+    /// <summary>Frame index for a standalone non-looping video with its own authored frame rate.</summary>
+    public static int OneShotFrameIndex(int frameCount, double seconds, int frameRate)
+    {
+        if (frameCount <= 0 || frameRate <= 0) return -1;
+        var index = (int)(Math.Max(0, seconds) * frameRate);
+        return Math.Clamp(index, 0, frameCount - 1);
     }
 
     /// <summary>How long a full pass through a sequence takes, in seconds.</summary>

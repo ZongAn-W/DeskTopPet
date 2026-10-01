@@ -100,6 +100,7 @@ src/DesktopPet/                 WPF front end (net8.0-windows)
   PetVisual.cs                  Renders sprite frames, or a vector placeholder when no art is present;
                                 owns the per-state animation clock
   SpriteAnimator.cs             Loads PNG frames per state folder (timing comes from AnimationTiming)
+  VideoPlayback.cs              Optional FFmpeg-backed transparent video playback with PNG fallback
   TrayController.cs             Generated tray icon and notification-area menu
   Assets/Character/             Committed PNG frames, one folder per animation
     idle/                       000.png .. 121.png
@@ -111,9 +112,9 @@ src/DesktopPet/                 WPF front end (net8.0-windows)
     turn_back/                  000.png .. 056.png
   Assets/DesktopPet.ico         Character-derived app/shortcut icon
 
-videos/                         Source clips the frames were extracted from. Present in the
-                                working copy but git-ignored: 113 MB, and nothing reads them
-                                at runtime. See videos/README.md
+videos/                         Source clips for optional runtime video playback and PNG
+                                regeneration. Present in the working copy but git-ignored.
+                                See videos/README.md
 tests/DesktopPet.Core.Tests/    xUnit tests for the core library
 tools/make_photo_pet.py         OpenCV/Pillow script that cut the frames out of the source photo
 docs/superpowers/               Design specification and implementation plan
@@ -171,10 +172,16 @@ says which animation they belong to, so the old `idle_000.png`-style prefix was 
 file includes them recursively (`Assets\Character\**\*.png`), and `Assets\Character\` itself holds
 only subfolders, so a stray image dropped at that level is ignored rather than embedded.
 
-Idle is played as a transparent PNG sequence rather than as video. A `MediaElement` was tried and
-abandoned: WPF mishandles the alpha channel of qtrle/ARGB video, which makes the character's hair
-and clothing render as transparent holes. The PNG frames carry a real alpha channel
-(`Format32bppArgb`, alpha values spanning 0–255), so do not reintroduce video playback for the pet.
+The default renderer uses transparent PNG sequences. The app also supports optional runtime video
+playback for the source clips through an external FFmpeg executable. WPF `MediaElement` is not used:
+it mishandles the alpha channel of qtrle/ARGB video, which makes the character's hair and clothing
+render as transparent holes. `VideoPlayback.cs` asks FFmpeg for BGRA frames, maps them onto the same
+180 x 210 canvas, and keeps the PNG/vector path as a fallback when a clip or decoder is unavailable.
+
+For runtime video playback, place the clips and a compatible `ffmpeg.exe` in `Assets/Video` beside
+the published executable, or install FFmpeg on PATH. `publish.ps1` copies the working `videos/*.mov`
+clips there when they exist; it does not bundle FFmpeg. The source clips remain external rather than
+embedded in the single-file executable.
 
 ### Current art state: the leftward walk is complete
 
@@ -327,10 +334,10 @@ Rules the loader enforces:
   build does not notice that a resource file was deleted or renamed, so the stale image stays
   embedded and the loader keeps resolving the old name.
 
-The source clips live in `videos/` — `idle-blink.mov`, `sigh.mov` and `turn.mov`, all 640×640
-QuickTime qtrle/ARGB at 30 fps. They are **not committed**: together they are about 83 MB, roughly
-92% of the working tree, and nothing reads them at runtime. The frames derived from them are fully
-committed, so a clone builds and runs without them. To re-extract frames after editing a clip:
+The source clips live in `videos/` — 640×640 QuickTime qtrle/ARGB clips at 30 fps. They are **not
+committed**: together they are about 113 MB. The frames derived from them are fully committed, so a
+clone builds and runs without them; runtime video playback is optional. To re-extract frames after
+editing a clip:
 
 ```powershell
 ffmpeg -i videos/idle-blink.mov -vf "format=rgba" idle_%03d.png

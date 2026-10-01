@@ -1,5 +1,9 @@
 # Character assets
 
+Runtime `.mov` clips and FFmpeg decoding are the only animation source used by the desktop app.
+PNG frames are not loaded or embedded. See `Assets/Video/README.md` for clip filenames and publish
+behavior.
+
 Character frames live here, **one folder per animation**. The folder name is the key
 `SpriteAnimator` looks for, and it maps to a `PetState` via the `Animations` table in
 `src/DesktopPet/SpriteAnimator.cs`:
@@ -8,12 +12,12 @@ Character frames live here, **one folder per animation**. The folder name is the
 | --- | --- | --- | --- |
 | `idle` | Idle | 30 fps | 122 |
 | `sigh` | Sighing | 30 fps | 122 |
-| `walk_left` | Walking left | 8 fps | none |
-| `walk_right` | Walking right | 8 fps | none |
+| `walk_left` | Walking left | 30 fps | 93 |
+| `walk_right` | Walking right | 30 fps | 159 |
 | `respond` | Click response | 8 fps | none |
 | `sleep` | Sleeping | 8 fps | none |
 | `drag` | Being dragged | 8 fps | none |
-| `turn_left` | Turning to face left | 30 fps | 81 |
+| `turn_left` | Turning to face left | 30 fps | 66 |
 | `turn_back` | Turning back to face front | 30 fps | 42 |
 
 ## Adding or replacing an animation

@@ -18,6 +18,8 @@
     <!-- One folder per animation; the folder name is the state prefix the loader looks for.
          Recursive so adding a new state is just dropping in a folder. Assets\Character itself
          holds only subfolders, so this cannot pick up loose stray images. -->
-    <Resource Include="Assets\Character\**\*.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Assets\Video\LeftWalk\*.mov" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
