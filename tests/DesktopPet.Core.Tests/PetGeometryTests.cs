@@ -147,4 +147,15 @@ public sealed class DipTransformTests
         Assert.False(transform.IsIdentity);
         Assert.Equal(0.6666666, transform.ScaleX, 6);
     }
+
+    [Fact]
+    public void Converts_drag_delta_from_device_pixels_to_window_dips()
+    {
+        var transform = new DipTransform(0.8, 0.6666667);
+
+        var delta = transform.ToDip(15, 30);
+
+        Assert.Equal(12, delta.X, 6);
+        Assert.Equal(20, delta.Y, 5);
+    }
 }

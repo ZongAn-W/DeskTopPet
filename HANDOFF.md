@@ -2,6 +2,43 @@
 
 这份文档用于记录每次开发后的实现结果、验证方式和后续注意事项。后续工作完成后，请在顶部追加一条记录。
 
+## 2026-10-01：修复拖动后人物消失
+
+### 问题与根因
+
+- 拖动结束时原逻辑会把宠物窗口强制移动到显示器工作区底部，用户把人物放在屏幕中间后松开鼠标，会看到人物突然跳走，像是消失。
+- 透明窗口的命中测试只返回脸部区域，鼠标按住后移到身体透明区域时可能丢失拖拽捕获。
+
+### 处理
+
+- 拖动结束后保留用户放置的纵向位置，只将窗口限制在当前显示器工作区可见范围内。
+- 宠物窗口命中测试覆盖完整窗口，拖动时不会因鼠标经过透明像素丢失捕获。
+
+### 验证
+
+- `dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore`：91 个测试通过。
+- `dotnet build src/DesktopPet/DesktopPet.csproj --no-restore`：通过，0 警告。
+- 发布时首次因旧进程短暂锁定 exe 失败；进程退出后重试成功。
+- 桌面快捷方式启动检查通过，运行的是 `publish/win-x64-current/DesktopPet.exe`。
+
+## 2026-10-01：修复鼠标拖拽速度与人物不一致
+
+### 问题与根因
+
+- 拖拽事件通过 `PointToScreen` 得到的是设备像素坐标，但 WPF 的 `Window.Left/Top` 使用 DIP。
+- 在 125% 或 150% 缩放下，直接把像素差值加到窗口 DIP 位置，会导致人物相对鼠标移动过快或过慢。
+
+### 处理
+
+- 拖拽更新位置时复用当前 `CompositionTarget.TransformFromDevice`，将鼠标横纵位移分别转换为 DIP 后再更新 `Left/Top`。
+- 为 `DipTransform.ToDip` 增加拖拽差值单元测试，覆盖非等比例横纵缩放。
+
+### 验证
+
+- `dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore`：91 个测试通过。
+- `dotnet build src/DesktopPet/DesktopPet.csproj --no-restore`：通过，0 警告。
+- `publish.ps1` 成功更新发布包；从桌面快捷方式启动后进程路径确认仍为 `publish/win-x64-current/DesktopPet.exe`。
+
 ## 2026-10-01：walking 单次播放与视频衔接帧处理
 
 ### 问题与根因

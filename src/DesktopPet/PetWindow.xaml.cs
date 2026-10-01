@@ -50,6 +50,14 @@ public partial class PetWindow : Window
     private bool _closing;
     private bool _exitAnimationStarted;
 
+    private DipTransform CurrentDipTransform()
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source?.CompositionTarget is null) return DipTransform.Identity;
+        var fromDevice = source.CompositionTarget.TransformFromDevice;
+        return DipTransform.FromDeviceToDip(fromDevice.M11, fromDevice.M22);
+    }
+
     public PetWindow()
     {
         InitializeComponent();
@@ -245,8 +253,10 @@ public partial class PetWindow : Window
         }
         if (_dragging)
         {
-            Left = _pressLeft + delta.X;
-            Top = _pressTop + delta.Y;
+            var transform = CurrentDipTransform();
+            var dipDelta = transform.ToDip(delta.X, delta.Y);
+            Left = _pressLeft + dipDelta.X;
+            Top = _pressTop + dipDelta.Y;
         }
     }
 
@@ -256,7 +266,7 @@ public partial class PetWindow : Window
         if (_dragging)
         {
             _controller.EndDrag();
-            SnapToCurrentMonitor();
+            ClampToCurrentMonitor();
         }
         else _controller.Click();
         _dragging = false;
@@ -285,11 +295,12 @@ public partial class PetWindow : Window
         Top = placement.Top;
     }
 
-    private void SnapToCurrentMonitor()
+    private void ClampToCurrentMonitor()
     {
         var monitor = CurrentMonitor();
         Left = PetGeometry.ClampX(Left, monitor.WorkingArea, PetWidth);
-        Top = PetGeometry.BottomAlignedTop(monitor.WorkingArea, PetHeight);
+        Top = Math.Clamp(Top, monitor.WorkingArea.Top,
+            Math.Max(monitor.WorkingArea.Top, monitor.WorkingArea.Bottom - PetHeight));
     }
 
     private MonitorArea CurrentMonitor()
@@ -326,15 +337,7 @@ public partial class PetWindow : Window
     /// window is moved onto a different-DPI monitor WPF re-interprets <c>Left</c>/<c>Top</c> in that
     /// monitor's DIP space. Treat multi-monitor placement at differing scale factors as unverified.
     /// </remarks>
-    private DipTransform CurrentDipTransform()
-    {
-        var source = PresentationSource.FromVisual(this);
-        if (source?.CompositionTarget is null) return DipTransform.Identity;
-        var fromDevice = source.CompositionTarget.TransformFromDevice;
-        return DipTransform.FromDeviceToDip(fromDevice.M11, fromDevice.M22);
-    }
-
-    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(SnapToCurrentMonitor);
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ClampToCurrentMonitor);
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {

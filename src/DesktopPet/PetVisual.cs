@@ -185,7 +185,7 @@ public sealed class PetVisual : FrameworkElement
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
     {
         var point = hitTestParameters.HitPoint;
-        return FaceRect().Contains(point) ? new PointHitTestResult(this, point) : null;
+        return new PointHitTestResult(this, point);
     }
 
     /// <summary>
