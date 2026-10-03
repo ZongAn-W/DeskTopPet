@@ -178,10 +178,22 @@ public partial class BubbleChatWindow : Window
 
     private void OnInputFocused(object sender, KeyboardFocusChangedEventArgs e)
     {
-        if (_replyCompleted && _runtime.Settings.BubbleDismiss == BubbleDismissMode.AfterReply && !_runtime.IsBusy)
-            StartDismissTimer(afterReply: false);
-        else
-            StopDismissTimer();
+        if (_closed || _runtime.IsBusy) return;
+        switch (_runtime.Settings.BubbleDismiss)
+        {
+            case BubbleDismissMode.ClickOutside:
+                StopDismissTimer();
+                break;
+            case BubbleDismissMode.ClickOutsideOrIdle:
+                StartDismissTimer(afterReply: false);
+                break;
+            case BubbleDismissMode.AfterReply when _replyCompleted:
+                StartDismissTimer(afterReply: false);
+                break;
+            default:
+                StopDismissTimer();
+                break;
+        }
     }
 
     private void OnInputTextChanged(object sender, TextChangedEventArgs e)
@@ -195,7 +207,7 @@ public partial class BubbleChatWindow : Window
 
     private void HandleDeactivated()
     {
-        if (_closed || _runtime.IsBusy || InputBox.IsKeyboardFocusWithin) return;
+        if (_closed || _runtime.IsBusy) return;
         if (_runtime.Settings.BubbleDismiss == BubbleDismissMode.ClickOutside ||
             _runtime.Settings.BubbleDismiss == BubbleDismissMode.ClickOutsideOrIdle)
         {
@@ -219,7 +231,7 @@ public partial class BubbleChatWindow : Window
 
     private void OnDismissTimerTick(object? sender, EventArgs e)
     {
-        if (_runtime.IsBusy || InputBox.IsKeyboardFocusWithin) return;
+        if (_runtime.IsBusy) return;
         StopDismissTimer();
         Hide();
     }

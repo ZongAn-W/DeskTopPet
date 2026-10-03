@@ -218,7 +218,6 @@ public sealed class BubbleChatWindowTests
                 PumpUntil(() => !runtime.IsBusy);
                 var timer = Assert.Single(timers.Timers.Where(candidate => candidate.IsRunning));
                 Assert.Equal(TimeSpan.FromSeconds(seconds), timer.Interval);
-                Keyboard.ClearFocus();
                 timer.Tick();
                 Assert.False(window.IsVisible);
             }
