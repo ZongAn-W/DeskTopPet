@@ -29,9 +29,10 @@ public partial class ChatWindow : Window
         _ownsRuntime = ownsRuntime;
         InitializeComponent();
         MessagesList.ItemsSource = _runtime.Entries;
-        StatusText.Text = string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey)
-            ? "先点 AI 设置，填写你的 DeepSeek API 密钥。"
-            : "Enter 发送，Shift+Enter 换行。";
+        StatusText.Text = _runtime.SettingsLoadError
+            ?? (string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey)
+                ? "先点 AI 设置，填写你的 DeepSeek API 密钥。"
+                : "Enter 发送，Shift+Enter 换行。");
         _runtime.StateChanged += OnRuntimeStateChanged;
         Loaded += (_, _) => { InputBox.Focus(); UpdateBusyState(); };
         Closing += OnClosing;

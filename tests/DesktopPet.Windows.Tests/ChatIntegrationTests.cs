@@ -141,7 +141,8 @@ public sealed class ChatIntegrationTests
             {
                 var send = runtime.SendAsync("sent before window", CancellationToken.None);
                 PumpUntil(() => !runtime.IsBusy);
-                send.GetAwaiter().GetResult();
+                PumpUntil(() => send.IsCompleted);
+                Assert.True(send.IsCompletedSuccessfully);
 
                 var window = new ChatWindow(runtime);
                 try
@@ -271,6 +272,28 @@ public sealed class ChatIntegrationTests
             Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, () => frame.Continue = false);
             Dispatcher.PushFrame(frame);
         }
+    }
+
+    [Fact]
+    public void ChatWindowShowsUnreadableSettingsRecoveryMessage()
+    {
+        RunOnSta(() =>
+        {
+            var path = NewSettingsPath();
+            File.WriteAllText(path, "not-encrypted");
+            using var http = new HttpClient(new ResponseHandler((_, _) =>
+                Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK))));
+            var window = new ChatWindow(http, new ChatSettingsStore(path));
+            try
+            {
+                Assert.Contains("重新填写", ((TextBlock)window.FindName("StatusText")).Text);
+            }
+            finally
+            {
+                window.CloseForExit();
+                File.Delete(path);
+            }
+        });
     }
 
     private sealed class ResponseHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler

@@ -26,9 +26,10 @@ public sealed class ChatRuntime : IDisposable
         {
             _settings = _settingsStore.Load().Normalize();
         }
-        catch (InvalidDataException)
+        catch (InvalidDataException error)
         {
             _settings = new ChatSettings().Normalize();
+            SettingsLoadError = error.Message;
         }
 
         Session = new ChatSession(new DeepSeekChatClient(_http));
@@ -39,6 +40,7 @@ public sealed class ChatRuntime : IDisposable
     public ChatSession Session { get; }
     internal ChatSettingsStore SettingsStore => _settingsStore;
     public ChatSettings Settings => _settings;
+    public string? SettingsLoadError { get; }
     public ObservableCollection<ChatEntry> Entries { get; }
     public bool IsBusy
     {
