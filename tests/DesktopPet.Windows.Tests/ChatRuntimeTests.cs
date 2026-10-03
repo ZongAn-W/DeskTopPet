@@ -130,6 +130,39 @@ public sealed class ChatRuntimeTests
     }
 
     [Fact]
+    public async Task ClearCancelsActiveRequestButKeepsItBusyUntilItHasExited()
+    {
+        var path = NewSettingsPath();
+        var store = new ChatSettingsStore(path);
+        store.Save(new ChatSettings { ApiKey = "runtime-test-key" });
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            using var runtime = CreateRuntime(store, async (_, _) =>
+            {
+                entered.SetResult();
+                return await releaseResponse.Task;
+            });
+
+            var activeRequest = runtime.SendAsync("old conversation", default);
+            await entered.Task;
+
+            runtime.Clear();
+
+            Assert.True(runtime.IsBusy);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SendAsync("new conversation", default));
+            releaseResponse.SetResult(Ok("late reply"));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => activeRequest);
+
+            Assert.False(runtime.IsBusy);
+            Assert.Single(runtime.Entries);
+            Assert.Empty(runtime.Session.Messages);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public void SaveSettingsNormalizesPersistsAndNotifies()
     {
         var path = NewSettingsPath();
@@ -177,6 +210,68 @@ public sealed class ChatRuntimeTests
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
         }
         finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task ClearDuringRequestPreventsLateCommitAndBlocksNewRequestUntilCompletion()
+    {
+        var path = NewSettingsPath();
+        var store = new ChatSettingsStore(path);
+        store.Save(new ChatSettings { ApiKey = "runtime-test-key" });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            using var runtime = CreateRuntime(store, async (_, _) =>
+            {
+                started.TrySetResult();
+                return await release.Task;
+            });
+            var first = runtime.SendAsync("old request", default);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            runtime.Clear();
+
+            Assert.True(runtime.IsBusy);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SendAsync("new request", default));
+            release.SetResult(Ok("late reply"));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+
+            Assert.False(runtime.IsBusy);
+            Assert.Single(runtime.Entries);
+            Assert.Empty(runtime.Session.Messages);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task DisposeDuringRequestPreventsLateSessionCommit()
+    {
+        var path = NewSettingsPath();
+        var store = new ChatSettingsStore(path);
+        store.Save(new ChatSettings { ApiKey = "runtime-test-key" });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runtime = CreateRuntime(store, async (_, _) =>
+        {
+            started.TrySetResult();
+            return await release.Task;
+        });
+        try
+        {
+            var request = runtime.SendAsync("late request", default);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            runtime.Dispose();
+            release.SetResult(Ok("late reply"));
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+            Assert.Empty(runtime.Session.Messages);
+        }
+        finally
+        {
+            runtime.Dispose();
+            File.Delete(path);
+        }
     }
 
     private static ChatRuntime CreateRuntime(

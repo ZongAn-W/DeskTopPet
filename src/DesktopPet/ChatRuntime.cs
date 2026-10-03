@@ -15,6 +15,7 @@ public sealed class ChatRuntime : IDisposable
     private readonly HttpClient _http;
     private RequestState? _request;
     private bool _disposed;
+    private bool _httpDisposed;
     private ChatSettings _settings;
 
     public ChatRuntime(HttpClient http, ChatSettingsStore settingsStore)
@@ -73,7 +74,7 @@ public sealed class ChatRuntime : IDisposable
             var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token).ConfigureAwait(true);
             lock (_gate)
             {
-                if (ReferenceEquals(_request, request))
+                if (ReferenceEquals(_request, request) && !request.Invalidated && !_disposed)
                 {
                     Entries.Add(new ChatEntry(AssistantSpeaker, reply, "#FFFFFF") { Role = "assistant" });
                 }
@@ -97,6 +98,7 @@ public sealed class ChatRuntime : IDisposable
                     _request = null;
             }
             request.Source.Dispose();
+            DisposeHttpIfNeeded();
             NotifyStateChanged();
         }
     }
@@ -118,7 +120,8 @@ public sealed class ChatRuntime : IDisposable
         lock (_gate)
         {
             request = _request;
-            _request = null;
+            if (request is not null)
+                request.Invalidated = true;
             Session.Clear();
             Entries.Clear();
             AddGreeting();
@@ -145,11 +148,12 @@ public sealed class ChatRuntime : IDisposable
             if (_disposed) return;
             _disposed = true;
             request = _request;
-            _request = null;
+            if (request is not null)
+                request.Invalidated = true;
         }
         try { request?.Source.Cancel(); }
         catch (ObjectDisposedException) { }
-        _http.Dispose();
+        DisposeHttpIfNeeded();
     }
 
     private void AddGreeting() => Entries.Add(new ChatEntry(AssistantSpeaker, Greeting, "#FFFFFF") { Role = "assistant" });
@@ -158,6 +162,17 @@ public sealed class ChatRuntime : IDisposable
     {
         public CancellationTokenSource Source { get; } = source;
         public ChatEntry Entry { get; set; } = null!;
+        public bool Invalidated { get; set; }
+    }
+
+    private void DisposeHttpIfNeeded()
+    {
+        lock (_gate)
+        {
+            if (!_disposed || _request is not null || _httpDisposed) return;
+            _httpDisposed = true;
+        }
+        _http.Dispose();
     }
 
     private void NotifyStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
