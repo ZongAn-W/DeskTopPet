@@ -11,6 +11,7 @@ public partial class ChatSettingsWindow : Window
     public ChatSettingsWindow(ChatSettings settings, ChatSettingsStore store)
     {
         InitializeComponent();
+        settings = settings.Normalize();
         _store = store;
         ApiKeyBox.Password = settings.ApiKey;
         ModelBox.Text = settings.Model;
@@ -41,6 +42,6 @@ public partial class ChatSettingsWindow : Window
             return;
         }
         SavedSettings = settings;
-        DialogResult = true;
+        if (IsVisible && Owner is not null) DialogResult = true;
     }
 }

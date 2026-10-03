@@ -53,6 +53,40 @@ public sealed class ChatIntegrationTests
     }
 
     [Fact]
+    public void SettingsWindowRoundTripsPresentationOptionsAndKeepsSecretsEncrypted()
+    {
+        RunOnSta(() =>
+        {
+            var path = NewSettingsPath();
+            var store = new ChatSettingsStore(path);
+            var initial = new ChatSettings { ApiKey = "window-test-api-key", Persona = "window-test-persona" };
+            store.Save(initial);
+            var window = new ChatSettingsWindow(initial with
+            {
+                DefaultPresentation = ChatPresentationMode.FullWindow,
+                BubbleMessageCount = 3,
+                BubbleDismiss = BubbleDismissMode.AfterReply
+            }, store);
+            try
+            {
+                window.Show();
+                Assert.Equal("FullWindow", ((ComboBox)window.FindName("PresentationBox")).SelectedValue);
+                Assert.Equal("3", ((ComboBox)window.FindName("MessageCountBox")).SelectedValue);
+                Assert.Equal("AfterReply", ((ComboBox)window.FindName("DismissBox")).SelectedValue);
+                ((Button)window.FindName("SaveButton"))!.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var bytes = File.ReadAllBytes(path);
+                Assert.DoesNotContain(initial.ApiKey, Encoding.UTF8.GetString(bytes));
+                Assert.DoesNotContain(initial.Persona, Encoding.UTF8.GetString(bytes));
+                var saved = store.Load();
+                Assert.Equal(ChatPresentationMode.FullWindow, saved.DefaultPresentation);
+                Assert.Equal(3, saved.BubbleMessageCount);
+                Assert.Equal(BubbleDismissMode.AfterReply, saved.BubbleDismiss);
+            }
+            finally { window.Close(); File.Delete(path); }
+        });
+    }
+
+    [Fact]
     public void ChatWindowSendsTextAndDisplaysReply()
     {
         RunOnSta(() =>

@@ -10,3 +10,5 @@ Implemented presentation and bubble dismissal settings.
 - Added focused model tests covering defaults, supported counts, invalid values, and old serialized settings.
 
 Validation: `dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore --filter ChatSettingsTests` (6 passed); `dotnet build src/DesktopPet/DesktopPet.csproj --no-restore` (passed).
+
+Follow-up validation: added a WPF integration test covering selector initialization, save round-trip, and encrypted API key/persona assertions. The focused Windows test passed. Settings window constructors now normalize incoming settings defensively.
