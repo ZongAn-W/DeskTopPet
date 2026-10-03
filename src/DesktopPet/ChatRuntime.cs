@@ -37,6 +37,7 @@ public sealed class ChatRuntime : IDisposable
     }
 
     public ChatSession Session { get; }
+    internal ChatSettingsStore SettingsStore => _settingsStore;
     public ChatSettings Settings => _settings;
     public ObservableCollection<ChatEntry> Entries { get; }
     public bool IsBusy

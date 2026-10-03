@@ -124,6 +124,70 @@ public sealed class ChatIntegrationTests
     }
 
     [Fact]
+    public void ChatWindowShowsMessagesSentBeforeTheWindowWasCreated()
+    {
+        RunOnSta(() =>
+        {
+            var path = NewSettingsPath();
+            var store = new ChatSettingsStore(path);
+            store.Save(new() { ApiKey = "fake-test-key-never-used-online" });
+            using var http = new HttpClient(new ResponseHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"choices":[{"message":{"content":"late reply"}}]}""", Encoding.UTF8, "application/json")
+                })));
+            using var runtime = new ChatRuntime(http, store);
+            try
+            {
+                var send = runtime.SendAsync("sent before window", CancellationToken.None);
+                PumpUntil(() => !runtime.IsBusy);
+                send.GetAwaiter().GetResult();
+
+                var window = new ChatWindow(runtime);
+                try
+                {
+                    var messages = (ItemsControl)window.FindName("MessagesList");
+                    Assert.Same(runtime.Entries, messages.ItemsSource);
+                    Assert.Equal("sent before window", ((ChatEntry)messages.Items[1]).Text);
+                    Assert.Equal("late reply", ((ChatEntry)messages.Items[2]).Text);
+                }
+                finally { window.CloseForExit(); }
+            }
+            finally { File.Delete(path); }
+        });
+    }
+
+    [Fact]
+    public void ChatWindowUsesEntriesFromAnInjectedRuntime()
+    {
+        RunOnSta(() =>
+        {
+            var path = NewSettingsPath();
+            var store = new ChatSettingsStore(path);
+            store.Save(new() { ApiKey = "fake-test-key-never-used-online" });
+            using var http = new HttpClient(new ResponseHandler((_, _) => Task.FromResult(
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"choices":[{"message":{"content":"runtime reply"}}]}""", Encoding.UTF8, "application/json")
+                })));
+            using var runtime = new ChatRuntime(http, store);
+            runtime.Entries.Add(new ChatEntry("你", "already shared", "#EEE5F5") { Role = "user" });
+            try
+            {
+                var window = new ChatWindow(runtime);
+                try
+                {
+                    window.Show();
+                    var entries = ((ItemsControl)window.FindName("MessagesList")).Items.Cast<ChatEntry>().ToArray();
+                    Assert.Contains(entries, entry => entry.Text == "already shared");
+                }
+                finally { window.CloseForExit(); }
+            }
+            finally { File.Delete(path); }
+        });
+    }
+
+    [Fact]
     public void CancelRestoresDraftAndAllowsRetry()
     {
         RunOnSta(() =>

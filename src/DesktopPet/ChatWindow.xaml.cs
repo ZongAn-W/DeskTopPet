@@ -1,5 +1,3 @@
-using System.Collections.ObjectModel;
-using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
@@ -9,59 +7,54 @@ namespace DesktopPet;
 
 public partial class ChatWindow : Window
 {
-    private readonly ObservableCollection<ChatEntry> _entries = [];
-    private readonly HttpClient _http;
-    private readonly ChatSettingsStore _settingsStore;
-    private readonly ChatSession _session;
-    private ChatSettings _settings = new();
-    private CancellationTokenSource? _request;
+    private readonly ChatRuntime _runtime;
+    private readonly bool _ownsRuntime;
     private bool _closed;
     private bool _exitRequested;
+
     public event EventHandler? ConversationActivity;
 
-    public ChatWindow() : this(new HttpClient { Timeout = TimeSpan.FromSeconds(100) }, new ChatSettingsStore()) { }
+    public ChatWindow()
+        : this(new ChatRuntime(new HttpClient { Timeout = TimeSpan.FromSeconds(100) }, new ChatSettingsStore()), true) { }
 
     public ChatWindow(HttpClient http, ChatSettingsStore settingsStore)
+        : this(new ChatRuntime(http, settingsStore), true) { }
+
+    public ChatWindow(ChatRuntime runtime)
+        : this(runtime, false) { }
+
+    private ChatWindow(ChatRuntime runtime, bool ownsRuntime)
     {
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _ownsRuntime = ownsRuntime;
         InitializeComponent();
-        _http = http;
-        _settingsStore = settingsStore;
-        _session = new(new DeepSeekChatClient(_http));
-        MessagesList.ItemsSource = _entries;
-        try { _settings = _settingsStore.Load(); }
-        catch (InvalidDataException error) { StatusText.Text = error.Message; }
-        AddEntry("她", "你好呀，我在这里。你可以和我聊聊今天的事。", false);
-        if (string.IsNullOrWhiteSpace(StatusText.Text))
-            StatusText.Text = string.IsNullOrWhiteSpace(_settings.ApiKey)
-                ? "先点 AI 设置，填写你的 DeepSeek API 密钥。"
-                : "Enter 发送，Shift+Enter 换行。";
-        Loaded += (_, _) => InputBox.Focus();
-        Closing += (_, e) =>
-        {
-            if (_exitRequested) return;
-            e.Cancel = true;
-            _request?.Cancel();
-            Hide();
-        };
-        Closed += (_, _) =>
-        {
-            _closed = true;
-            _request?.Cancel();
-            _http.Dispose();
-        };
+        MessagesList.ItemsSource = _runtime.Entries;
+        StatusText.Text = string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey)
+            ? "先点 AI 设置，填写你的 DeepSeek API 密钥。"
+            : "Enter 发送，Shift+Enter 换行。";
+        _runtime.StateChanged += OnRuntimeStateChanged;
+        Loaded += (_, _) => { InputBox.Focus(); UpdateBusyState(); };
+        Closing += OnClosing;
+        Closed += OnClosed;
     }
 
-    public void CloseForExit()
+    public void CloseForExit() { _exitRequested = true; Close(); }
+
+    private void OnRuntimeStateChanged(object? sender, EventArgs e)
     {
-        _exitRequested = true;
-        Close();
+        if (Dispatcher.CheckAccess()) { UpdateBusyState(); return; }
+        _ = Dispatcher.BeginInvoke(UpdateBusyState);
     }
 
-    private void AddEntry(string speaker, string text, bool user)
+    private void UpdateBusyState()
     {
-        _entries.Add(new(speaker, text, user ? "#EEE5F5" : "#FFFFFF"));
-        if (_entries.Count > 100) _entries.RemoveAt(0);
-        Dispatcher.BeginInvoke(() => ChatScroll.ScrollToEnd());
+        if (_closed) return;
+        var busy = _runtime.IsBusy;
+        SendButton.Content = busy ? "取消" : "发送";
+        SettingsButton.IsEnabled = NewChatButton.IsEnabled = !busy;
+        InputBox.IsReadOnly = busy;
+        if (!busy) Dispatcher.BeginInvoke(() => ChatScroll.ScrollToEnd());
+        ConversationActivity?.Invoke(this, EventArgs.Empty);
     }
 
     private async void OnSend(object sender, RoutedEventArgs e) => await SendAsync();
@@ -71,30 +64,28 @@ public partial class ChatWindow : Window
         if (e.Key == Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
         {
             e.Handled = true;
-            if (_request is null) await SendAsync();
+            if (!_runtime.IsBusy) await SendAsync();
         }
     }
 
     private async Task SendAsync()
     {
-        if (_request is not null) { _request.Cancel(); return; }
+        if (_runtime.IsBusy) { _runtime.Cancel(); return; }
         var text = InputBox.Text.Trim();
         if (text.Length == 0) return;
-        if (string.IsNullOrWhiteSpace(_settings.ApiKey)) { OpenSettings(); if (string.IsNullOrWhiteSpace(_settings.ApiKey)) return; }
+        if (string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey))
+        {
+            OpenSettings();
+            if (string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey)) return;
+        }
         ConversationActivity?.Invoke(this, EventArgs.Empty);
-        using var request = new CancellationTokenSource();
-        _request = request;
-        SendButton.Content = "取消";
-        SettingsButton.IsEnabled = NewChatButton.IsEnabled = false;
-        InputBox.IsReadOnly = true;
-        AddEntry("你", text, true);
         InputBox.Clear();
         StatusText.Text = "她正在想怎么回答你…";
+        UpdateBusyState();
         try
         {
-            var reply = await _session.SendAsync(text, _settings, request.Token);
+            await _runtime.SendAsync(text, CancellationToken.None);
             if (_closed) return;
-            AddEntry("她", reply, false);
             StatusText.Text = "Enter 发送，Shift+Enter 换行。";
         }
         catch (OperationCanceledException)
@@ -111,15 +102,7 @@ public partial class ChatWindow : Window
         }
         finally
         {
-            _request = null;
-            if (!_closed)
-            {
-                SendButton.Content = "发送";
-                SettingsButton.IsEnabled = NewChatButton.IsEnabled = true;
-                InputBox.IsReadOnly = false;
-                InputBox.Focus();
-                ConversationActivity?.Invoke(this, EventArgs.Empty);
-            }
+            if (!_closed) { UpdateBusyState(); InputBox.Focus(); ConversationActivity?.Invoke(this, EventArgs.Empty); }
         }
     }
 
@@ -127,19 +110,34 @@ public partial class ChatWindow : Window
 
     private void OpenSettings()
     {
-        var dialog = new ChatSettingsWindow(_settings, _settingsStore) { Owner = this };
+        var dialog = new ChatSettingsWindow(_runtime.Settings, _runtime.SettingsStore) { Owner = this };
         if (dialog.ShowDialog() != true || dialog.SavedSettings is null) return;
-        _settings = dialog.SavedSettings;
+        _runtime.SaveSettings(dialog.SavedSettings);
         StatusText.Text = "设置已保存，发送一句话试试吧。";
         InputBox.Focus();
     }
 
     private void OnNewChat(object sender, RoutedEventArgs e)
     {
-        _session.Clear();
-        _entries.Clear();
-        AddEntry("她", "开始新的聊天吧，我在这里。", false);
+        _runtime.Clear();
         StatusText.Text = "这次对话会从这里开始。";
+        InputBox.Clear();
+        InputBox.Focus();
     }
 
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_exitRequested) return;
+        e.Cancel = true;
+        _runtime.Cancel();
+        Hide();
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        _closed = true;
+        _runtime.StateChanged -= OnRuntimeStateChanged;
+        _runtime.Cancel();
+        if (_ownsRuntime) _runtime.Dispose();
+    }
 }
