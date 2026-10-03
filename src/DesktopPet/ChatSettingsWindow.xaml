@@ -32,6 +32,21 @@
                     <ComboBoxItem Content="deepseek-flash"/>
                     <ComboBoxItem Content="deepseek-v4-pro"/>
                 </ComboBox>
+                <TextBlock Text="默认聊天入口" Margin="0,0,0,6"/>
+                <ComboBox x:Name="PresentationBox" SelectedValuePath="Tag" Padding="5" Margin="0,0,0,12">
+                    <ComboBoxItem Tag="Bubble" Content="轻量气泡"/>
+                    <ComboBoxItem Tag="FullWindow" Content="完整聊天窗口"/>
+                </ComboBox>
+                <TextBlock Text="气泡显示消息数" Margin="0,0,0,6"/>
+                <ComboBox x:Name="MessageCountBox" SelectedValuePath="Tag" Padding="5" Margin="0,0,0,12">
+                    <ComboBoxItem Tag="3" Content="3 条"/><ComboBoxItem Tag="4" Content="4 条"/><ComboBoxItem Tag="5" Content="5 条"/>
+                </ComboBox>
+                <TextBlock Text="气泡收起方式" Margin="0,0,0,6"/>
+                <ComboBox x:Name="DismissBox" SelectedValuePath="Tag" Padding="5" Margin="0,0,0,16">
+                    <ComboBoxItem Tag="ClickOutside" Content="点击窗口外收起"/>
+                    <ComboBoxItem Tag="ClickOutsideOrIdle" Content="点击窗口外或空闲 15 秒收起"/>
+                    <ComboBoxItem Tag="AfterReply" Content="回复完成约 20 秒后收起"/>
+                </ComboBox>
                 <TextBlock Text="她的性格和聊天方式" Margin="0,0,0,6"/>
                 <TextBox x:Name="PersonaBox" Height="140" TextWrapping="Wrap" AcceptsReturn="True"
                          VerticalScrollBarVisibility="Auto" Padding="8" MaxLength="4000" Margin="0,0,0,16"/>

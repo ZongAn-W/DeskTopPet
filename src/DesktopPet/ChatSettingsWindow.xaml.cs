@@ -15,6 +15,9 @@ public partial class ChatSettingsWindow : Window
         ApiKeyBox.Password = settings.ApiKey;
         ModelBox.Text = settings.Model;
         PersonaBox.Text = settings.Persona;
+        PresentationBox.SelectedValue = settings.DefaultPresentation.ToString();
+        MessageCountBox.SelectedValue = settings.BubbleMessageCount.ToString();
+        DismissBox.SelectedValue = settings.BubbleDismiss.ToString();
     }
 
     private void OnSave(object sender, RoutedEventArgs e)
@@ -26,8 +29,11 @@ public partial class ChatSettingsWindow : Window
         {
             ApiKey = ApiKeyBox.Password.Trim(),
             Model = ModelBox.Text.Trim(),
-            Persona = PersonaBox.Text.Trim()
-        };
+            Persona = PersonaBox.Text.Trim(),
+            DefaultPresentation = (ChatPresentationMode)Enum.Parse(typeof(ChatPresentationMode), (string)PresentationBox.SelectedValue),
+            BubbleMessageCount = int.Parse((string)MessageCountBox.SelectedValue),
+            BubbleDismiss = (BubbleDismissMode)Enum.Parse(typeof(BubbleDismissMode), (string)DismissBox.SelectedValue)
+        }.Normalize();
         try { _store.Save(settings); }
         catch (Exception error) when (error is System.IO.IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
         {

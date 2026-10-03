@@ -16,7 +16,7 @@ public sealed class ChatSettingsStore(string? path = null)
         try
         {
             var json = ProtectedData.Unprotect(File.ReadAllBytes(_path), null, DataProtectionScope.CurrentUser);
-            return JsonSerializer.Deserialize<ChatSettings>(json) ?? throw new JsonException();
+            return (JsonSerializer.Deserialize<ChatSettings>(json) ?? throw new JsonException()).Normalize();
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException or JsonException)
         {
@@ -26,7 +26,7 @@ public sealed class ChatSettingsStore(string? path = null)
 
     public void Save(ChatSettings settings)
     {
-        var encrypted = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(settings), null, DataProtectionScope.CurrentUser);
+        var encrypted = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(settings.Normalize()), null, DataProtectionScope.CurrentUser);
         var directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         var temporary = _path + ".tmp";
