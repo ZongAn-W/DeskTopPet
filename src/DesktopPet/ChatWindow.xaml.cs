@@ -7,8 +7,6 @@ using DesktopPet.Core;
 
 namespace DesktopPet;
 
-public sealed record ChatEntry(string Speaker, string Text, string Background);
-
 public partial class ChatWindow : Window
 {
     private readonly ObservableCollection<ChatEntry> _entries = [];
