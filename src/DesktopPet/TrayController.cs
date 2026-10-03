@@ -7,10 +7,12 @@ namespace DesktopPet;
 public sealed class TrayController : IDisposable
 {
     private readonly NotifyIcon _icon;
+    public ContextMenuStrip ContextMenuStrip => _icon.ContextMenuStrip!;
     public event EventHandler? TogglePauseRequested;
     public event EventHandler? ToggleSleepRequested;
     public event EventHandler? ExitRequested;
-    public event EventHandler? ChatRequested;
+    public event EventHandler? BubbleChatRequested;
+    public event EventHandler? FullChatRequested;
 
     public TrayController()
     {
@@ -23,7 +25,8 @@ public sealed class TrayController : IDisposable
         };
         _icon.ContextMenuStrip.Items.Add("暂停/继续走动", null, (_, _) => TogglePauseRequested?.Invoke(this, EventArgs.Empty));
         _icon.ContextMenuStrip.Items.Add("睡觉/唤醒", null, (_, _) => ToggleSleepRequested?.Invoke(this, EventArgs.Empty));
-        _icon.ContextMenuStrip.Items.Add("和她聊天…", null, (_, _) => ChatRequested?.Invoke(this, EventArgs.Empty));
+        _icon.ContextMenuStrip.Items.Add("轻量气泡聊天", null, (_, _) => BubbleChatRequested?.Invoke(this, EventArgs.Empty));
+        _icon.ContextMenuStrip.Items.Add("完整聊天窗口", null, (_, _) => FullChatRequested?.Invoke(this, EventArgs.Empty));
         _icon.ContextMenuStrip.Items.Add(new ToolStripSeparator());
         _icon.ContextMenuStrip.Items.Add("退出", null, (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty));
     }

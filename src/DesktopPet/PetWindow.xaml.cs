@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using System.Windows.Media;
 using System.IO;
 using System.Windows.Media.Imaging;
+using System.Net.Http;
 using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 using DesktopPet.Core;
@@ -37,9 +38,11 @@ public partial class PetWindow : Window
     private const double MinStrollRoomPx = 12;
     private readonly PetController _controller = new();
     private readonly PreferencesStore _preferences = new();
+    private readonly ChatRuntime _chatRuntime;
     private readonly DispatcherTimer _timer;
     private TrayController? _tray;
     private ChatWindow? _chatWindow;
+    private BubbleChatWindow? _bubbleWindow;
     private bool _openingChat;
     private DateTime _lastTick = DateTime.UtcNow;
     private TimeSpan? _lastRenderingTime;
@@ -61,7 +64,11 @@ public partial class PetWindow : Window
     }
 
     public PetWindow()
+        : this(new ChatRuntime(new HttpClient { Timeout = TimeSpan.FromSeconds(100) }, new ChatSettingsStore())) { }
+
+    public PetWindow(ChatRuntime chatRuntime)
     {
+        _chatRuntime = chatRuntime ?? throw new ArgumentNullException(nameof(chatRuntime));
         InitializeComponent();
         ContextMenu = CreateContextMenu();
         Loaded += OnLoaded;
@@ -88,7 +95,8 @@ public partial class PetWindow : Window
         try
         {
             _tray = new TrayController();
-            _tray.ChatRequested += (_, _) => OpenChat();
+            _tray.BubbleChatRequested += (_, _) => OpenBubbleChat();
+            _tray.FullChatRequested += (_, _) => OpenFullChat();
             _tray.TogglePauseRequested += (_, _) => TogglePause();
             _tray.ToggleSleepRequested += (_, _) => ToggleSleep();
             _tray.ExitRequested += (_, _) => Close();
@@ -104,8 +112,10 @@ public partial class PetWindow : Window
     private ContextMenu CreateContextMenu()
     {
         var menu = new ContextMenu();
-        var chat = new MenuItem { Header = "和她聊天…" };
-        chat.Click += (_, _) => OpenChat();
+        var bubbleChat = new MenuItem { Header = "轻量气泡聊天" };
+        bubbleChat.Click += (_, _) => OpenBubbleChat();
+        var fullChat = new MenuItem { Header = "完整聊天窗口" };
+        fullChat.Click += (_, _) => OpenFullChat();
         var pause = new MenuItem { Header = "暂停走动" };
         pause.Click += (_, _) => TogglePause();
         var sleep = new MenuItem { Header = "睡觉" };
@@ -118,7 +128,8 @@ public partial class PetWindow : Window
         var videoStatus = new MenuItem { Header = "动画源：加载中", IsEnabled = false };
         var exit = new MenuItem { Header = "退出" };
         exit.Click += (_, _) => Close();
-        menu.Items.Add(chat);
+        menu.Items.Add(bubbleChat);
+        menu.Items.Add(fullChat);
         menu.Items.Add(new Separator());
         menu.Items.Add(pause);
         menu.Items.Add(sleep);
@@ -179,7 +190,7 @@ public partial class PetWindow : Window
         var now = DateTime.UtcNow;
         var elapsed = now - _lastTick;
         _lastTick = now;
-        var chatting = _chatWindow?.IsVisible == true;
+        var chatting = _chatWindow?.IsVisible == true || _bubbleWindow?.IsVisible == true || _chatRuntime.IsBusy;
         if (!chatting) _controller.Advance(elapsed);
         if (_wasStrolling && !_controller.IsStrolling)
             _nextWalk = StrollSchedule.NextWalkTime(now, Random.Shared);
@@ -240,7 +251,7 @@ public partial class PetWindow : Window
         {
             ReleaseMouseCapture();
             _openingChat = true;
-            OpenChat();
+            OpenDefaultChat();
             e.Handled = true;
             return;
         }
@@ -291,11 +302,51 @@ public partial class PetWindow : Window
         e.Handled = true;
     }
 
-    private void OpenChat()
+    public void OpenDefaultChat()
+    {
+        if (_chatRuntime.Settings.DefaultPresentation == ChatPresentationMode.Bubble)
+            OpenBubbleChat();
+        else
+            OpenFullChat();
+    }
+
+    public void OpenBubbleChat()
     {
         if (_exitAnimationStarted) return;
         _controller.Restore(_controller.IsPaused, manualSleeping: false);
         _travelRemainder = 0;
+        _chatWindow?.Hide();
+        if (_bubbleWindow is not null)
+        {
+            if (_bubbleWindow.WindowState == WindowState.Minimized) _bubbleWindow.WindowState = WindowState.Normal;
+            _bubbleWindow.Show();
+            _bubbleWindow.Activate();
+            return;
+        }
+        var area = CurrentMonitor().WorkingArea;
+        var bubble = new BubbleChatWindow(_chatRuntime) { Owner = this };
+        bubble.Left = Math.Clamp(Left + PetWidth + 12, area.Left, Math.Max(area.Left, area.Right - bubble.Width));
+        bubble.Top = Math.Clamp(Top + PetHeight - bubble.Height, area.Top, Math.Max(area.Top, area.Bottom - bubble.Height));
+        bubble.ExpandRequested += (_, _) => OpenFullChat();
+        bubble.IsVisibleChanged += (_, _) =>
+        {
+            if (!bubble.IsVisible) _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+        };
+        bubble.Closed += (_, _) =>
+        {
+            _bubbleWindow = null;
+            _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+        };
+        _bubbleWindow = bubble;
+        bubble.Show();
+    }
+
+    public void OpenFullChat()
+    {
+        if (_exitAnimationStarted) return;
+        _controller.Restore(_controller.IsPaused, manualSleeping: false);
+        _travelRemainder = 0;
+        _bubbleWindow?.Hide();
         if (_chatWindow is not null)
         {
             if (_chatWindow.WindowState == WindowState.Minimized) _chatWindow.WindowState = WindowState.Normal;
@@ -304,7 +355,7 @@ public partial class PetWindow : Window
             return;
         }
         var area = CurrentMonitor().WorkingArea;
-        var chat = new ChatWindow { Owner = this };
+        var chat = new ChatWindow(_chatRuntime) { Owner = this };
         chat.Left = Math.Clamp(Left + PetWidth + 12, area.Left, Math.Max(area.Left, area.Right - chat.Width));
         chat.Top = Math.Clamp(Top + PetHeight - chat.Height, area.Top, Math.Max(area.Top, area.Bottom - chat.Height));
         chat.ConversationActivity += (_, _) => _controller.Restore(_controller.IsPaused, manualSleeping: false);
@@ -395,6 +446,7 @@ public partial class PetWindow : Window
             e.Cancel = true;
             _exitAnimationStarted = true;
             _chatWindow?.CloseForExit();
+            _bubbleWindow?.CloseForExit();
             Pet.BeginExternalAnimation("disappear.mov", CloseAfterExitAnimation);
             return;
         }
@@ -409,6 +461,7 @@ public partial class PetWindow : Window
             RightWalkSpeed = _rightWalkSpeed
         });
         _tray?.Dispose();
+        _chatRuntime.Dispose();
     }
 
     private void CloseAfterExitAnimation()
