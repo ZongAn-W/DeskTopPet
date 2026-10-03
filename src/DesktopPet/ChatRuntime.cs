@@ -13,8 +13,7 @@ public sealed class ChatRuntime : IDisposable
     private readonly ChatSettingsStore _settingsStore;
     private readonly object _gate = new();
     private readonly HttpClient _http;
-    private CancellationTokenSource? _request;
-    private ChatEntry? _pendingUserEntry;
+    private RequestState? _request;
     private bool _disposed;
     private ChatSettings _settings;
 
@@ -56,28 +55,28 @@ public sealed class ChatRuntime : IDisposable
             throw new ChatServiceException("璇疯緭鍏ユ兂璇寸殑璇濄€?");
 
         var trimmed = text.Trim();
-        CancellationTokenSource request;
-        ChatEntry userEntry;
+        RequestState request;
         lock (_gate)
         {
             if (_request is not null)
                 throw new InvalidOperationException("A chat request is already active.");
 
-            request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            request = new RequestState(CancellationTokenSource.CreateLinkedTokenSource(cancellationToken));
             _request = request;
-            userEntry = new ChatEntry(UserSpeaker, trimmed, "#EEE5F5");
-            _pendingUserEntry = userEntry;
-            Entries.Add(userEntry);
+            request.Entry = new ChatEntry(UserSpeaker, trimmed, "#EEE5F5") { Role = "user" };
+            Entries.Add(request.Entry);
         }
         NotifyStateChanged();
 
         try
         {
-            var reply = await Session.SendAsync(trimmed, Settings, request.Token).ConfigureAwait(true);
+            var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token).ConfigureAwait(true);
             lock (_gate)
             {
-                _pendingUserEntry = null;
-                Entries.Add(new ChatEntry(AssistantSpeaker, reply, "#FFFFFF"));
+                if (ReferenceEquals(_request, request))
+                {
+                    Entries.Add(new ChatEntry(AssistantSpeaker, reply, "#FFFFFF") { Role = "assistant" });
+                }
             }
             NotifyStateChanged();
         }
@@ -85,9 +84,7 @@ public sealed class ChatRuntime : IDisposable
         {
             lock (_gate)
             {
-                if (_pendingUserEntry is not null)
-                    Entries.Remove(_pendingUserEntry);
-                _pendingUserEntry = null;
+                Entries.Remove(request.Entry);
             }
             NotifyStateChanged();
             throw;
@@ -99,7 +96,7 @@ public sealed class ChatRuntime : IDisposable
                 if (ReferenceEquals(_request, request))
                     _request = null;
             }
-            request.Dispose();
+            request.Source.Dispose();
             NotifyStateChanged();
         }
     }
@@ -109,7 +106,7 @@ public sealed class ChatRuntime : IDisposable
         lock (_gate)
         {
             if (_request is null) return;
-            try { _request.Cancel(); }
+            try { _request.Source.Cancel(); }
             catch (ObjectDisposedException) { }
         }
     }
@@ -117,17 +114,16 @@ public sealed class ChatRuntime : IDisposable
     public void Clear()
     {
         ThrowIfDisposed();
-        CancellationTokenSource? request;
+        RequestState? request;
         lock (_gate)
         {
             request = _request;
             _request = null;
-            _pendingUserEntry = null;
             Session.Clear();
             Entries.Clear();
             AddGreeting();
         }
-        try { request?.Cancel(); }
+        try { request?.Source.Cancel(); }
         catch (ObjectDisposedException) { }
         NotifyStateChanged();
     }
@@ -143,22 +139,26 @@ public sealed class ChatRuntime : IDisposable
 
     public void Dispose()
     {
-        CancellationTokenSource? request;
+        RequestState? request;
         lock (_gate)
         {
             if (_disposed) return;
             _disposed = true;
             request = _request;
             _request = null;
-            _pendingUserEntry = null;
         }
-        try { request?.Cancel(); }
+        try { request?.Source.Cancel(); }
         catch (ObjectDisposedException) { }
-        request?.Dispose();
         _http.Dispose();
     }
 
-    private void AddGreeting() => Entries.Add(new ChatEntry(AssistantSpeaker, Greeting, "#FFFFFF"));
+    private void AddGreeting() => Entries.Add(new ChatEntry(AssistantSpeaker, Greeting, "#FFFFFF") { Role = "assistant" });
+
+    private sealed class RequestState(CancellationTokenSource source)
+    {
+        public CancellationTokenSource Source { get; } = source;
+        public ChatEntry Entry { get; set; } = null!;
+    }
 
     private void NotifyStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
 

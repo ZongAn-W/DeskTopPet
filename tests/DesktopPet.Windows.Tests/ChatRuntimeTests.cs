@@ -26,7 +26,7 @@ public sealed class ChatRuntimeTests
             Assert.Equal("runtime-test-key", runtime.Settings.ApiKey);
             Assert.Equal(5, runtime.Settings.BubbleMessageCount);
             Assert.Single(runtime.Entries);
-            Assert.Equal("濂?", runtime.Entries[0].Speaker);
+            Assert.Equal("assistant", runtime.Entries[0].Role);
             Assert.Empty(runtime.Session.Messages);
         }
         finally { File.Delete(path); }
@@ -49,6 +49,8 @@ public sealed class ChatRuntimeTests
             Assert.Equal(3, runtime.Entries.Count);
             Assert.Equal("hello", runtime.Entries[1].Text);
             Assert.Equal("reply", runtime.Entries[2].Text);
+            Assert.Equal("user", runtime.Entries[1].Role);
+            Assert.Equal("assistant", runtime.Entries[2].Role);
             Assert.Equal(2, runtime.Session.Messages.Count);
             Assert.Equal("hello", runtime.Session.Messages[0].Content);
             Assert.Equal("reply", runtime.Session.Messages[1].Content);
