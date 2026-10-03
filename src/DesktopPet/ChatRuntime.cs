@@ -150,6 +150,7 @@ public sealed class ChatRuntime : IDisposable
             request = _request;
             if (request is not null)
                 request.Invalidated = true;
+            Session.Clear();
         }
         try { request?.Source.Cancel(); }
         catch (ObjectDisposedException) { }
