@@ -27,6 +27,19 @@ public sealed class ChatSettingsTests
         Assert.Equal(count, loaded.BubbleMessageCount);
     }
 
+    [Theory]
+    [InlineData(ChatPresentationMode.Bubble, BubbleDismissMode.ClickOutside)]
+    [InlineData(ChatPresentationMode.FullWindow, BubbleDismissMode.ClickOutsideOrIdle)]
+    [InlineData(ChatPresentationMode.FullWindow, BubbleDismissMode.AfterReply)]
+    public void PresentationAndDismissalValuesRoundTrip(ChatPresentationMode presentation, BubbleDismissMode dismiss)
+    {
+        var settings = new ChatSettings { DefaultPresentation = presentation, BubbleDismiss = dismiss };
+        var loaded = JsonSerializer.Deserialize<ChatSettings>(JsonSerializer.Serialize(settings))!.Normalize();
+
+        Assert.Equal(presentation, loaded.DefaultPresentation);
+        Assert.Equal(dismiss, loaded.BubbleDismiss);
+    }
+
     [Fact]
     public void NormalizeClampsMessageCountAndMapsInvalidEnums()
     {

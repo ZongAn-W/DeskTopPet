@@ -59,14 +59,16 @@ public sealed class ChatIntegrationTests
         {
             var path = NewSettingsPath();
             var store = new ChatSettingsStore(path);
-            var initial = new ChatSettings { ApiKey = "window-test-api-key", Persona = "window-test-persona" };
-            store.Save(initial);
-            var window = new ChatSettingsWindow(initial with
+            var initial = new ChatSettings
             {
+                ApiKey = "window-test-api-key",
+                Persona = "window-test-persona",
                 DefaultPresentation = ChatPresentationMode.FullWindow,
                 BubbleMessageCount = 3,
                 BubbleDismiss = BubbleDismissMode.AfterReply
-            }, store);
+            };
+            store.Save(initial);
+            var window = new ChatSettingsWindow(store.Load(), store);
             try
             {
                 window.Show();
