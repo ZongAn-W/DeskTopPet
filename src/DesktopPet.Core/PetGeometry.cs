@@ -38,4 +38,25 @@ public static class PetGeometry
         var bounded = Math.Clamp(offset, -range, range);
         return ClampX(currentX + bounded, area, petWidth);
     }
+
+    /// <summary>
+    /// Picks a stroll direction using a random sample in [0, 1). True means left, false means right,
+    /// and null means neither side has enough room. All positions and distances use the same units.
+    /// </summary>
+    public static bool? PickStrollDirection(
+        double currentX, PetRect area, double petWidth, double sample, double minimumRoom = 12)
+    {
+        var x = ClampX(currentX, area, petWidth);
+        var roomLeft = x - area.Left;
+        var roomRight = Math.Max(0, area.Right - petWidth - x);
+        var canGoLeft = roomLeft > minimumRoom;
+        var canGoRight = roomRight > minimumRoom;
+
+        if (!canGoLeft && !canGoRight) return null;
+        if (!canGoLeft) return false;
+        if (!canGoRight) return true;
+
+        // More room on a side makes that direction more likely, drawing the pet towards the centre.
+        return sample < roomLeft / (roomLeft + roomRight);
+    }
 }

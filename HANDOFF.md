@@ -2,6 +2,92 @@
 
 这份文档用于记录每次开发后的实现结果、验证方式和后续注意事项。后续工作完成后，请在顶部追加一条记录。
 
+## 2026-10-03：接入 DeepSeek 纯文字聊天
+
+### 用户需求
+
+- 桌宠接入 DeepSeek API，先做文字聊天；不需要朗读，只用文字回复。
+
+### 实现
+
+- 双击人物、桌宠右键菜单或托盘菜单中的“和她聊天…”打开聊天窗口。Enter 发送，Shift+Enter 换行；支持取消请求、新对话和 AI 设置。
+- 使用官方 `https://api.deepseek.com/chat/completions`，默认模型 `deepseek-flash`，关闭思考输出与流式输出，只展示最终文字回答。模型和人物性格可在设置窗口中修改。
+- 成功的对话保留最近20轮上下文；请求失败或取消不会提交到上下文，并恢复草稿。关闭聊天窗口会隐藏窗口并取消请求，重新打开仍保留本次运行中的对话；新对话或退出清除上下文，不保存聊天记录到磁盘。
+- API 密钥及设置整体通过当前 Windows 用户的 DPAPI 加密，保存到 `%LocalAppData%/DesktopPet/ai-settings.bin`。不在源码、发布包或日志中保存明文密钥。
+- 聊天显示时暂停自动散步并唤醒人物，关闭后重新安排散步。程序退出时关闭聊天并取消请求；保留此前右行素材和屏幕位置方向概率的修改。
+- 没有语音输出、朗读或麦克风功能。只在用户发送消息时联网。
+
+### 验证
+
+- `dotnet test DesktopPet.sln --no-restore --disable-build-servers -m:1`：123项核心测试与6项 Windows 集成测试通过，共129项，0失败。
+- 新测试覆盖鉴权和请求格式、最终回答、常见 API 错误、取消、上下文提交及上限；本机集成测试覆盖加密保存、设置损坏恢复、发送、取消和错误后的草稿恢复。
+- 已渲染并检查聊天默认尺寸、最小尺寸和设置窗口布局，检查图片位于 `artifacts/chat-qa/`。
+- Release 自包含单文件发布成功。已通过安全重启脚本更新 `publish/win-x64-current/DesktopPet.exe`，新进程43128正常响应，安装后的可执行文件 SHA-256 与已验证构建一致。
+
+### 后续注意
+
+- 尚未提供真实 DeepSeek 密钥，因此只用模拟 HTTP 响应验证交互，没有执行真实云端对话。用户在“AI 设置”保存有效密钥后可发送消息验证。
+- 官方接口和模型以 https://api-docs.deepseek.com/ 的当前文档为准；模型名称可手动修改。
+
+## 2026-10-03：根据屏幕位置调整行走方向概率
+
+### 用户需求
+
+- 人物在屏幕左侧时提高向右移动的概率，在屏幕右侧时提高向左移动的概率。
+
+### 实现
+
+- `PetGeometry.PickStrollDirection` 根据当前显示器工作区和人物宽度计算两侧可移动空间，并按空间比例随机选择方向。
+- 可移动范围25%位置的向右概率为75%，中间左右各50%，75%位置的向左概率为75%。
+- 保留12 DIP的最小移动空间；一侧空间不足时只选择另一侧，两侧都不足时暂不开始行走。
+- `PetWindow` 在每次准备行走时使用最新位置和 `Random.Shared.NextDouble()` 选择方向。
+
+### 验证
+
+- 先用旧的固定左向优先规则运行新测试，6项位置概率用例按预期失败；改为按位置选择后，全部110项测试通过。
+- 16项新用例覆盖方向分布、屏幕中央、边缘、负坐标显示器、不同宽度、人物超出边界和无移动空间。
+- `dotnet build src/DesktopPet/DesktopPet.csproj --no-restore`：通过，0警告、0错误。
+- 已完成Release发布，正常退出旧桌宠并更新 `publish/win-x64-current/DesktopPet.exe`；可执行文件哈希与已验证构建一致，新进程正常响应。
+
+## 2026-10-02：替换右行三段素材
+
+### 用户需求
+
+- 使用桌面 `右行1/右行1-1.mov`、`右行2/右行2-1.mov`、`右行3/右行3-1.mov` 替换原右行素材。
+- 右行1、右行3原地播放；只有右行2带动人物向右移动。
+
+### 实现
+
+- 原素材完整复制到 `src/DesktopPet/Assets/Video/RightWalk/`，分别命名为 `right-walk-1.mov`、`right-walk-2.mov`、`right-walk-3.mov`。
+- 三段均为30 fps，分别42、215、45帧；控制器时长同步为1.4秒、约7.17秒、1.5秒，每段只播放一次。
+- 视频目录解析增加 `Assets/Video/RightWalk/`，三段映射到 `TurningRight`、`WalkingRight`、`StandingRight`。
+- 项目显式复制右行素材到构建和发布目录，并用 `ExcludeFromSingleFile` 保持视频为独立文件，供 ffmpeg 按路径读取。
+
+### 验证
+
+- 新增三段阶段边界测试；`dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore`：94个测试通过。
+- `publish.ps1` 成功更新 `publish/win-x64-current/`；三段发布视频与桌面原素材的 SHA-256 完全一致。
+- 已检查三段的首帧、中间帧、末帧，人物完整，右行方向及末段转回正面的动作正确。
+- 已启动更新后的发布程序，进程路径为 `publish/win-x64-current/DesktopPet.exe`，进程正常响应。
+
+## 2026-10-02：减少动画切换卡顿
+
+### 问题与根因
+
+- 每次状态切换都会重新启动 ffmpeg；普通视频逻辑原先要等整段视频全部解码完，才把新片段交给渲染器。
+- 因此上一段动画结束后，下一段首帧不能及时显示，表现为短暂停顿。
+
+### 处理
+
+- 普通视频加载增加首帧回调：首帧解码完成就立即切换显示，剩余帧继续在后台解码。
+- 首帧切换时重置该状态的播放时钟，完整帧序列解码完成后只补齐缓存，不再重新等待或重置播放。
+
+### 验证
+
+- `dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj --no-restore`：91 个测试通过。
+- `dotnet build src/DesktopPet/DesktopPet.csproj --no-restore`：通过，0 警告。
+- `publish.ps1` 成功更新发布包；桌面快捷方式启动检查通过。
+
 ## 2026-10-01：修复拖动后人物消失
 
 ### 问题与根因

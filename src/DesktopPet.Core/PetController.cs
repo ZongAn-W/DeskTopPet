@@ -25,10 +25,10 @@ public sealed class PetController
     private const int WalkStopFrames = 0;    // unused with the three-clip set
     private const int TurnBackFrames = 94;   // left-walk-3.mov, fixed position
 
-    // Rightward. WalkRight is a one-shot: it already ends facing the viewer, so it is never repeated.
-    private const int TurnRightFrames = 95;  // turn_right
-    private const int WalkRightFrames = 159; // walk_right
-    private const int StandRightFrames = 18; // stand_right
+    // The supplied rightward clips play once at 30 fps; only the middle clip travels.
+    private const int TurnRightFrames = 42;  // right-walk-1.mov, fixed position
+    private const int WalkRightFrames = 215; // right-walk-2.mov, moving
+    private const int StandRightFrames = 45; // right-walk-3.mov, fixed position
 
     /// <summary>Length of a sprite sequence, derived from its frame count at 30 fps.</summary>
     private static TimeSpan Frames(long count) => TimeSpan.FromSeconds(count / 30.0);

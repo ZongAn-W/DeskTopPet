@@ -32,13 +32,15 @@ public partial class PetWindow : Window
     private MenuItem? _rightSpeedMenu;
     // Leftover DIP from the previous tick, carried forward so no fraction of a step is lost.
     private double _travelRemainder;
-    // Do not start a stroll with less than this much room to the left, so a stroll always visibly
+    // Do not start a stroll with less than this much room in its direction, so it always visibly
     // travels instead of grinding against the edge of the working area.
     private const double MinStrollRoomPx = 12;
     private readonly PetController _controller = new();
     private readonly PreferencesStore _preferences = new();
     private readonly DispatcherTimer _timer;
     private TrayController? _tray;
+    private ChatWindow? _chatWindow;
+    private bool _openingChat;
     private DateTime _lastTick = DateTime.UtcNow;
     private TimeSpan? _lastRenderingTime;
     private DateTime _nextWalk = DateTime.MaxValue;
@@ -86,6 +88,7 @@ public partial class PetWindow : Window
         try
         {
             _tray = new TrayController();
+            _tray.ChatRequested += (_, _) => OpenChat();
             _tray.TogglePauseRequested += (_, _) => TogglePause();
             _tray.ToggleSleepRequested += (_, _) => ToggleSleep();
             _tray.ExitRequested += (_, _) => Close();
@@ -101,6 +104,8 @@ public partial class PetWindow : Window
     private ContextMenu CreateContextMenu()
     {
         var menu = new ContextMenu();
+        var chat = new MenuItem { Header = "和她聊天…" };
+        chat.Click += (_, _) => OpenChat();
         var pause = new MenuItem { Header = "暂停走动" };
         pause.Click += (_, _) => TogglePause();
         var sleep = new MenuItem { Header = "睡觉" };
@@ -113,6 +118,8 @@ public partial class PetWindow : Window
         var videoStatus = new MenuItem { Header = "动画源：加载中", IsEnabled = false };
         var exit = new MenuItem { Header = "退出" };
         exit.Click += (_, _) => Close();
+        menu.Items.Add(chat);
+        menu.Items.Add(new Separator());
         menu.Items.Add(pause);
         menu.Items.Add(sleep);
         menu.Items.Add(speed);
@@ -172,12 +179,13 @@ public partial class PetWindow : Window
         var now = DateTime.UtcNow;
         var elapsed = now - _lastTick;
         _lastTick = now;
-        _controller.Advance(elapsed);
+        var chatting = _chatWindow?.IsVisible == true;
+        if (!chatting) _controller.Advance(elapsed);
         if (_wasStrolling && !_controller.IsStrolling)
             _nextWalk = StrollSchedule.NextWalkTime(now, Random.Shared);
         _wasStrolling = _controller.IsStrolling;
 
-        if (!_dragging && !_controller.IsPaused)
+        if (!_dragging && !_controller.IsPaused && !chatting)
         {
             var area = CurrentMonitor().WorkingArea;
 
@@ -201,14 +209,9 @@ public partial class PetWindow : Window
             }
             else if (_controller.State == PetState.Idle && now >= _nextWalk)
             {
-                var roomLeft = Left - area.Left;
-                var roomRight = area.Right - PetWidth - Left;
-                var canGoLeft = roomLeft > MinStrollRoomPx;
-                var canGoRight = roomRight > MinStrollRoomPx;
-
-                // Pick a direction with room to move, preferring left when both are open.
-                var goLeft = canGoLeft || !canGoRight;
-                if (!((goLeft ? canGoLeft : canGoRight) && _controller.TryStartStroll(goLeft)))
+                var goLeft = PetGeometry.PickStrollDirection(
+                    Left, area, PetWidth, Random.Shared.NextDouble(), MinStrollRoomPx);
+                if (!goLeft.HasValue || !_controller.TryStartStroll(goLeft.Value))
                 {
                     _nextWalk = now.AddSeconds(2);
                 }
@@ -233,6 +236,15 @@ public partial class PetWindow : Window
 
     private void OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (e.ClickCount == 2)
+        {
+            ReleaseMouseCapture();
+            _openingChat = true;
+            OpenChat();
+            e.Handled = true;
+            return;
+        }
+        _openingChat = false;
         _pressPoint = PointToScreen(e.GetPosition(this));
         _pressLeft = Left;
         _pressTop = Top;
@@ -243,7 +255,7 @@ public partial class PetWindow : Window
 
     private void OnMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed) return;
+        if (_openingChat || e.LeftButton != MouseButtonState.Pressed) return;
         var point = PointToScreen(e.GetPosition(this));
         var delta = point - _pressPoint;
         if (!_dragging && Math.Abs(delta.X) + Math.Abs(delta.Y) >= 8)
@@ -263,6 +275,12 @@ public partial class PetWindow : Window
     private void OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         ReleaseMouseCapture();
+        if (_openingChat)
+        {
+            _openingChat = false;
+            e.Handled = true;
+            return;
+        }
         if (_dragging)
         {
             _controller.EndDrag();
@@ -271,6 +289,36 @@ public partial class PetWindow : Window
         else _controller.Click();
         _dragging = false;
         e.Handled = true;
+    }
+
+    private void OpenChat()
+    {
+        if (_exitAnimationStarted) return;
+        _controller.Restore(_controller.IsPaused, manualSleeping: false);
+        _travelRemainder = 0;
+        if (_chatWindow is not null)
+        {
+            if (_chatWindow.WindowState == WindowState.Minimized) _chatWindow.WindowState = WindowState.Normal;
+            _chatWindow.Show();
+            _chatWindow.Activate();
+            return;
+        }
+        var area = CurrentMonitor().WorkingArea;
+        var chat = new ChatWindow { Owner = this };
+        chat.Left = Math.Clamp(Left + PetWidth + 12, area.Left, Math.Max(area.Left, area.Right - chat.Width));
+        chat.Top = Math.Clamp(Top + PetHeight - chat.Height, area.Top, Math.Max(area.Top, area.Bottom - chat.Height));
+        chat.ConversationActivity += (_, _) => _controller.Restore(_controller.IsPaused, manualSleeping: false);
+        chat.IsVisibleChanged += (_, _) =>
+        {
+            if (!chat.IsVisible) _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+        };
+        chat.Closed += (_, _) =>
+        {
+            _chatWindow = null;
+            _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+        };
+        _chatWindow = chat;
+        chat.Show();
     }
 
     private void TogglePause()
@@ -346,6 +394,7 @@ public partial class PetWindow : Window
         {
             e.Cancel = true;
             _exitAnimationStarted = true;
+            _chatWindow?.CloseForExit();
             Pet.BeginExternalAnimation("disappear.mov", CloseAfterExitAnimation);
             return;
         }

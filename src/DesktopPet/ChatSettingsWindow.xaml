@@ -1,0 +1,46 @@
+<Window x:Class="DesktopPet.ChatSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AI 设置" Width="460" Height="510" MinWidth="420" MinHeight="470"
+        WindowStartupLocation="CenterOwner" Background="#FAF8FC" FontFamily="Microsoft YaHei UI"
+        FontSize="14" ResizeMode="CanResize" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,14">
+            <TextBlock Text="让她认识你" FontSize="22" FontWeight="SemiBold" Foreground="#493958"/>
+            <TextBlock Text="连接 DeepSeek，设置她聊天的语气。" Foreground="#756A7D" Margin="0,6,0,0"/>
+        </StackPanel>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="DeepSeek API 密钥" Margin="0,0,0,6"/>
+                <PasswordBox x:Name="ApiKeyBox" Padding="8"/>
+                <TextBlock Text="仅在本机加密保存。可在 DeepSeek 开放平台创建密钥。"
+                           FontSize="12" Foreground="#756A7D" TextWrapping="Wrap" Margin="0,6,0,16"/>
+                <TextBlock Text="模型" Margin="0,0,0,6"/>
+                <ComboBox x:Name="ModelBox" IsEditable="True" Padding="5" Margin="0,0,0,16">
+                    <ComboBoxItem Content="deepseek-flash"/>
+                    <ComboBoxItem Content="deepseek-v4-pro"/>
+                </ComboBox>
+                <TextBlock Text="她的性格和聊天方式" Margin="0,0,0,6"/>
+                <TextBox x:Name="PersonaBox" Height="140" TextWrapping="Wrap" AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto" Padding="8" MaxLength="4000" Margin="0,0,0,16"/>
+            </StackPanel>
+        </ScrollViewer>
+        <TextBlock Grid.Row="2" x:Name="StatusText" TextWrapping="Wrap" Foreground="#98435B" Margin="0,12,0,12"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="取消" IsCancel="True"/>
+            <Button Content="保存设置" IsDefault="True" Click="OnSave" Background="#EEE5F5"/>
+        </StackPanel>
+    </Grid>
+</Window>

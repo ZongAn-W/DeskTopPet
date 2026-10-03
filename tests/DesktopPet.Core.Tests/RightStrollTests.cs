@@ -4,9 +4,8 @@ using Xunit;
 namespace DesktopPet.Core.Tests;
 
 /// <summary>
-/// The rightward stroll. It differs from the leftward one in a way that matters: its walk module is a
-/// one-shot clip that already ends facing the viewer, so there is no repeat knob. Its opening turn and
-/// final settle are acted in place.
+/// The supplied rightward stroll plays three clips once. Its opening turn and final settle are acted
+/// in place, and only the middle walking clip travels.
 /// </summary>
 public sealed class RightStrollTests
 {
@@ -54,6 +53,25 @@ public sealed class RightStrollTests
         Assert.False(controller.IsMoving);
     }
 
+    [Theory]
+    [InlineData(StrollPhase.TurningRight, 42, StrollPhase.WalkingRight, false)]
+    [InlineData(StrollPhase.WalkingRight, 215, StrollPhase.StandingRight, true)]
+    [InlineData(StrollPhase.StandingRight, 45, StrollPhase.None, false)]
+    public void Each_supplied_clip_finishes_before_the_next_phase(
+        StrollPhase phase, int frames, StrollPhase next, bool moves)
+    {
+        var controller = StartRight();
+        while (controller.Phase != phase) controller.Advance(TimeSpan.FromMilliseconds(50));
+
+        var finalMillisecond = TimeSpan.FromMilliseconds(1);
+        controller.Advance(Frames(frames) - finalMillisecond);
+        Assert.Equal(phase, controller.Phase);
+        Assert.Equal(moves, controller.IsMoving);
+
+        controller.Advance(finalMillisecond);
+        Assert.Equal(next, controller.Phase);
+    }
+
     [Fact]
     public void A_right_stroll_is_one_fixed_pass_whatever_the_repeat_count()
     {
@@ -65,7 +83,7 @@ public sealed class RightStrollTests
             return c.RightStrollDuration;
         }
 
-        Assert.Equal(Frames(95 + 159 + 18), Duration(1));
+        Assert.Equal(Frames(42 + 215 + 45), Duration(1));
         Assert.Equal(Duration(1), Duration(2));
         Assert.Equal(Duration(1), Duration(5));
 
@@ -87,7 +105,7 @@ public sealed class RightStrollTests
         }
 
         // The opening turn and final settle are acted in place; only the walk module travels.
-        var expected = Frames(159);
+        var expected = Frames(215);
         Assert.True(Math.Abs((moving - expected).TotalSeconds) <= 0.1,
             $"travelling window was {moving.TotalSeconds:F2}s, expected about {expected.TotalSeconds:F2}s");
     }
@@ -162,8 +180,7 @@ public sealed class RightWalkPlaybackTests
     [Fact]
     public void The_right_walk_does_not_loop()
     {
-        // It already contains a turn back to the viewer, so wrapping would snap her away again
-        // mid-stroll.
+        // Each supplied clip is one complete pass, so wrapping would restart its action mid-stroll.
         Assert.False(AnimationTiming.Loops(PetState.WalkingRight));
         Assert.False(AnimationTiming.Loops(PetState.TurningRight));
         Assert.False(AnimationTiming.Loops(PetState.StandingRight));
@@ -178,9 +195,9 @@ public sealed class RightWalkPlaybackTests
     }
 
     [Theory]
-    [InlineData(PetState.TurningRight, 95)]
-    [InlineData(PetState.WalkingRight, 159)]
-    [InlineData(PetState.StandingRight, 18)]
+    [InlineData(PetState.TurningRight, 42)]
+    [InlineData(PetState.WalkingRight, 215)]
+    [InlineData(PetState.StandingRight, 45)]
     public void Each_right_sequence_advances_through_its_frames_and_holds_the_last(PetState state, int frames)
     {
         // Sample from the middle of each frame's slot, which is where a playing animation actually

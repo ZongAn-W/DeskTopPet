@@ -23,10 +23,10 @@ internal static class VideoClipCatalog
             // authored pose, so the phase transition does not visibly stutter.
             [PetState.TurningLeft] = new("left-walk-1.mov", SkipFrames: 1, MaxFrames: 29),
             [PetState.WalkingLeft] = new("left-walk-2.mov", SkipFrames: 1, MaxFrames: 175),
-            [PetState.TurningBack] = new("left-walk-3.mov", MaxFrames: 94)
-            ,[PetState.TurningRight] = new("turn-right.mov")
-            ,[PetState.WalkingRight] = new("walk-right.mov")
-            ,[PetState.StandingRight] = new("stand-right.mov")
+            [PetState.TurningBack] = new("left-walk-3.mov", MaxFrames: 94),
+            [PetState.TurningRight] = new("right-walk-1.mov"),
+            [PetState.WalkingRight] = new("right-walk-2.mov"),
+            [PetState.StandingRight] = new("right-walk-3.mov")
         };
 
     public static bool TryGet(PetState state, out VideoClipDefinition definition) => Clips.TryGetValue(state, out definition!);
@@ -73,6 +73,7 @@ internal static class VideoAssetResolver
         {
             yield return Path.Combine(current.FullName, "Assets", "Video");
             yield return Path.Combine(current.FullName, "Assets", "Video", "LeftWalk");
+            yield return Path.Combine(current.FullName, "Assets", "Video", "RightWalk");
             yield return Path.Combine(current.FullName, "videos");
             yield return Path.Combine(current.FullName, "videos", "LeftWalk");
             yield return current.FullName;
@@ -90,8 +91,9 @@ internal static class VideoFrameDecoder
 
     public static Task<IReadOnlyList<BitmapSource>> LoadAsync(
         PetState state,
-        CancellationToken cancellationToken) => Task.Run(
-            () => LoadSafely(state, cancellationToken), cancellationToken);
+        CancellationToken cancellationToken,
+        Action<BitmapSource>? onFirstFrame = null) => Task.Run(
+            () => LoadSafely(state, cancellationToken, onFirstFrame), cancellationToken);
 
     public static Task<IReadOnlyList<BitmapSource>> LoadFileAsync(
         string fileName,
@@ -116,11 +118,12 @@ internal static class VideoFrameDecoder
 
     private static async Task<IReadOnlyList<BitmapSource>> LoadSafely(
         PetState state,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<BitmapSource>? onFirstFrame)
     {
         try
         {
-            return await Load(state, cancellationToken);
+            return await Load(state, cancellationToken, onFirstFrame);
         }
         catch (OperationCanceledException)
         {
@@ -134,14 +137,15 @@ internal static class VideoFrameDecoder
 
     private static async Task<IReadOnlyList<BitmapSource>> Load(
         PetState state,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<BitmapSource>? onFirstFrame)
     {
         if (!VideoClipCatalog.TryGet(state, out var definition)) return Array.Empty<BitmapSource>();
         var input = VideoAssetResolver.FindVideo(definition);
         var ffmpeg = VideoAssetResolver.FindFfmpeg();
         if (input is null || ffmpeg is null) return Array.Empty<BitmapSource>();
 
-        return await LoadInput(input, cancellationToken, definition.SkipFrames, definition.MaxFrames);
+        return await LoadInput(input, cancellationToken, definition.SkipFrames, definition.MaxFrames, onFirstFrame);
     }
 
     private static async Task<IReadOnlyList<BitmapSource>> LoadInput(

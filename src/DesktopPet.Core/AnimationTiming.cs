@@ -27,7 +27,7 @@ public static class AnimationTiming
         // jump back to its first pose before the closing clip begins.
         PetState.WalkingLeft => false,
         PetState.Sleeping => true,
-        // WalkingRight is a one-shot: the clip already ends facing the viewer, so it must not wrap.
+        // The rightward clips each play once before the next phase begins.
         _ => false
     };
 

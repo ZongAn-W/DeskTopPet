@@ -1,0 +1,55 @@
+<Window x:Class="DesktopPet.ChatWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="和她聊天" Width="460" Height="620" MinWidth="400" MinHeight="450"
+        Background="#FAF8FC" FontFamily="Microsoft YaHei UI" FontSize="14"
+        WindowStartupLocation="Manual">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="6,0,0,0"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,16">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="我在这里" Foreground="#493958" FontSize="22" FontWeight="SemiBold"/>
+                <TextBlock Text="想说什么，都可以慢慢说。" Foreground="#756A7D" FontSize="12" Margin="0,4,0,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="NewChatButton" Content="新对话" Click="OnNewChat"/>
+                <Button x:Name="SettingsButton" Content="AI 设置" Click="OnSettings"/>
+            </StackPanel>
+        </DockPanel>
+        <ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl x:Name="MessagesList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{Binding Background}" CornerRadius="12" Padding="12" Margin="0,0,4,12">
+                            <StackPanel>
+                                <TextBlock Text="{Binding Speaker}" Foreground="#756A7D" FontSize="12" Margin="0,0,0,6"/>
+                                <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                         BorderThickness="0" Background="Transparent" Padding="0" Foreground="#352E3C"/>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+        <TextBlock x:Name="StatusText" Grid.Row="2" Foreground="#756A7D" TextWrapping="Wrap" Margin="0,10,0,10"/>
+        <TextBox x:Name="InputBox" Grid.Row="3" TextWrapping="Wrap" AcceptsReturn="True" MinHeight="65" MaxHeight="120"
+                 VerticalScrollBarVisibility="Auto" Padding="10" MaxLength="4000" PreviewKeyDown="OnInputKeyDown"
+                 ToolTip="Enter 发送，Shift+Enter 换行"/>
+        <DockPanel Grid.Row="4" Margin="0,12,0,0">
+            <TextBlock Text="Enter 发送 · Shift+Enter 换行" DockPanel.Dock="Left" Foreground="#756A7D" FontSize="12" VerticalAlignment="Center"/>
+            <Button x:Name="SendButton" Content="发送" Click="OnSend" HorizontalAlignment="Right" MinWidth="72" Background="#EEE5F5"/>
+        </DockPanel>
+    </Grid>
+</Window>

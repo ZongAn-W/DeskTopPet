@@ -30,6 +30,7 @@ public sealed class PetVisual : FrameworkElement
     private Task<IReadOnlyList<BitmapSource>>? _videoLoad;
     private PetState _videoFrameState;
     private bool _waitingForVideo;
+    private bool _videoFirstFrameReady;
     private bool _externalAnimationActive;
     private bool _externalAnimationReady;
     private double _externalPhase;
@@ -121,23 +122,20 @@ public sealed class PetVisual : FrameworkElement
             // gap without showing a partially decoded frame.
             _videoFrames = Array.Empty<BitmapSource>();
             _waitingForVideo = true;
+            _videoFirstFrameReady = false;
             BeginVideoLoad(State);
+        }
+        if (_videoFirstFrameReady && _videoFrames.Count > 0)
+        {
+            _waitingForVideo = false;
         }
         if (_videoLoad is { IsCompletedSuccessfully: true } load && load.Result.Count > 0)
         {
             _videoFrames = load.Result;
             _videoFrameState = State;
             _videoLoad = null;
-            _phase = 0;
             _waitingForVideo = false;
-            var completed = _externalAnimationCompleted;
-            _externalAnimationCompleted = null;
-            if (completed is not null)
-                Dispatcher.BeginInvoke(completed);
-            // Let the first frame render for a complete tick before consuming elapsed time. This
-            // makes the handoff deterministic even when decoding finishes between render callbacks.
-            InvalidateVisual();
-            return;
+            _videoFirstFrameReady = true;
         }
         else if (_videoLoad is { IsCompleted: true })
         {
@@ -176,7 +174,18 @@ public sealed class PetVisual : FrameworkElement
         _videoCancellation?.Cancel();
         _videoCancellation?.Dispose();
         _videoCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        _videoLoad = VideoFrameDecoder.LoadAsync(state, _videoCancellation.Token);
+        var token = _videoCancellation.Token;
+        _videoLoad = VideoFrameDecoder.LoadAsync(state, token, firstFrame =>
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (token.IsCancellationRequested || State != state || _phaseState != state) return;
+                _videoFrames = [firstFrame];
+                _videoFrameState = state;
+                _phase = 0;
+                _videoFirstFrameReady = true;
+                _waitingForVideo = false;
+                InvalidateVisual();
+            })));
         var load = _videoLoad;
         _ = load.ContinueWith(_ => Dispatcher.BeginInvoke(new Action(InvalidateVisual)),
             CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);

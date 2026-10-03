@@ -17,8 +17,7 @@ public enum PetState
     WalkStopping,
     TurningBack,
 
-    // The rightward stroll. It has no repeat knob: its walk module is a one-shot that already ends
-    // facing the viewer, so a right stroll is always its own fixed length.
+    // The rightward stroll plays three supplied clips once; only WalkingRight travels.
     TurningRight,
     StandingRight
 }
@@ -38,7 +37,7 @@ public enum StrollPhase
     Stopping,
     TurningBack,
 
-    // Rightward: turn out, walk (one shot, already ends facing the viewer), settle.
+    // Rightward: turn out in place, walk once, then turn back in place.
     TurningRight,
     WalkingRight,
     StandingRight

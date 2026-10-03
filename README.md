@@ -3,7 +3,8 @@
 A native Windows desktop pet built with WPF on .NET 8. A single transparent, always-on-top
 character lives on your desktop: she breathes and blinks while idle, strolls along the bottom
 edge of the active monitor's working area, reacts when you click her, falls asleep when ignored,
-and can be dragged between monitors. Everything runs locally — no chat, no network, no accounts.
+and can be dragged between monitors. Optional text chat connects to DeepSeek when you send a
+message; pet animation and movement continue to work locally without an API account.
 
 The character art is derived from a reference photograph, but **the photograph itself is never
 bundled or read at runtime**. Only the cut-out, background-free PNG frames ship with the app.
@@ -21,7 +22,9 @@ bundled or read at runtime**. Only the cut-out, background-free PNG frames ship 
 | Manual sleep | Sleep/wake on demand; stays asleep until you wake her |
 | Drag | Hold and move the character by 8 px or more to pick her up. She stays awake while held and snaps back to the bottom edge of whichever monitor you drop her on |
 | Pause | Freezes walking. A paused pet can still auto-sleep and still responds to clicks |
-| Right-click menu | Pause/resume walking, sleep/wake, independent left/right speed settings, exit |
+| Text chat | Double-click the pet, or choose 和她聊天 from her right-click menu or the tray. DeepSeek replies in a separate text window; no speech or microphone is used |
+| Chat context | Keeps the last 20 successful turns for the current app session. Closing and reopening the chat keeps its context; 新对话 starts fresh, and quitting the app clears it |
+| Right-click menu | Chat, pause/resume walking, sleep/wake, independent left/right speed settings, exit |
 | Notification area | Tray icon with the same commands plus exit |
 | Persistence | Monitor, horizontal position, paused/sleeping state, and left/right speeds are restored on next launch |
 | Multi-monitor | Remembers the monitor by device name, handles negative (left-of-primary) coordinates, and converts coordinates DPI-aware so mixed-scale setups place correctly |
@@ -42,8 +45,8 @@ The published build is self-contained, so **end users need no .NET runtime at al
 ## Build, test, and run
 
 ```powershell
-# Unit tests (88 tests, no window required)
-dotnet test tests/DesktopPet.Core.Tests/DesktopPet.Core.Tests.csproj
+# Core and Windows chat integration tests (no visible window required)
+dotnet test DesktopPet.sln
 
 # Build the app
 dotnet build src/DesktopPet/DesktopPet.csproj
@@ -64,7 +67,7 @@ dotnet build DesktopPet.sln
 ./publish.ps1
 ```
 
-This produces a self-contained, single-file `publish/win-x64/DesktopPet.exe` that can be copied
+This produces a self-contained, single-file `publish/win-x64-current/DesktopPet.exe` that can be copied
 to any x64 Windows machine and run directly. The `publish/` directory is not tracked in git —
 build it locally, or attach it to a
 [GitHub Release](https://github.com/ZongAn-W/DeskTopPet/releases) instead of committing it.
@@ -354,6 +357,23 @@ build output.
 
 ## Configuration
 
+### DeepSeek 文字聊天
+
+1. 双击桌宠，或在桌宠/托盘的右键菜单中选择 **和她聊天…**。
+2. 点击 **AI 设置**，填写你在 [DeepSeek 开放平台](https://platform.deepseek.com/) 创建的 API 密钥。
+3. 默认模型是 `deepseek-flash`，也可填写其他受账户支持的模型。设置中可调整她的性格和聊天方式。
+4. 保存后输入文字，按 Enter 发送；Shift+Enter 换行。等待时点击 **取消** 可取消请求。
+
+聊天只有文字回复，不使用麦克风或朗读。聊天窗口显示时暂停自动散步；关闭窗口后恢复散步。
+关闭窗口不会丢失本次运行中的聊天，**新对话** 或退出程序会清除上下文。聊天记录不写入磁盘。
+密钥和 AI 设置通过当前 Windows 用户的 DPAPI 加密保存在
+`%LocalAppData%\DesktopPet\ai-settings.bin`，不写入源码或发布文件。
+请求使用 [DeepSeek 官方 Chat Completions 接口](https://api-docs.deepseek.com/api/create-chat-completion/)，
+仅在用户发送时将人物设定、最近的对话和当前消息提交给 DeepSeek。
+密钥错误、余额不足、请求频繁、网络失败或超时会显示提示，并保留草稿以便重试。
+
+### Pet preferences
+
 Preferences are stored as JSON at:
 
 ```
@@ -403,8 +423,8 @@ to its defaults.
 
 ## Out of scope
 
-Chat, networking, reminders, growth or leveling mechanics, multiple simultaneous characters, and
-launch-at-startup are intentionally not part of this version.
+Voice input/output, reminders, growth or leveling mechanics, multiple simultaneous characters,
+and launch-at-startup are intentionally not part of this version.
 
 ## License
 
