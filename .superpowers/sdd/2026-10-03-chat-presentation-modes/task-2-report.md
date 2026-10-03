@@ -11,6 +11,7 @@
 - Added an explicit `Role` property to `ChatEntry` while preserving the existing localized `Speaker` display label and `Background` properties. Alternate views can use `Role` instead of inferring ownership from colors.
 - `ChatRuntime` disposes the injected `HttpClient` exactly once; the application can therefore dispose the runtime during its exit path.
 - Conversation entries are never written to disk. Only settings pass through `ChatSettingsStore`.
+- `Clear` and `Dispose` invalidate an active request without clearing its request slot until the async operation exits. This prevents a late response from committing and prevents a replacement request from starting during the old request's cleanup. `Dispose` defers `HttpClient.Dispose()` until that slot is released.
 
 ## Tests
 
@@ -24,4 +25,4 @@ Commands run:
 
 ## Notes
 
-Unreadable encrypted settings currently fall back to normalized defaults in the runtime constructor, matching first-run behavior without writing over the unreadable file. The existing settings window still reports unreadable settings when it loads directly. Task 3 should decide how the owning window surfaces this runtime-level fallback if that distinction needs to be visible.
+Unreadable encrypted settings currently fall back to normalized defaults in the runtime constructor, matching first-run behavior without writing over or deleting the unreadable file. This keeps the runtime constructible for the existing first-run and recovery flow; `ChatSettingsWindow` still reports unreadable settings when it loads directly. Task 3 should decide whether the owning window should expose a runtime-level recovery status, since the required runtime interface has no error property.
