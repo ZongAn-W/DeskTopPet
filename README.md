@@ -22,10 +22,11 @@ bundled or read at runtime**. Only the cut-out, background-free PNG frames ship 
 | Manual sleep | Sleep/wake on demand; stays asleep until you wake her |
 | Drag | Hold and move the character by 8 px or more to pick her up. She stays awake while held and snaps back to the bottom edge of whichever monitor you drop her on |
 | Pause | Freezes walking. A paused pet can still auto-sleep and still responds to clicks |
-| Text chat | Double-click the pet, or choose 和她聊天 from her right-click menu or the tray. DeepSeek replies in a separate text window; no speech or microphone is used |
-| Chat context | Keeps the last 20 successful turns for the current app session. Closing and reopening the chat keeps its context; 新对话 starts fresh, and quitting the app clears it |
-| Right-click menu | Chat, pause/resume walking, sleep/wake, independent left/right speed settings, exit |
-| Notification area | Tray icon with the same commands plus exit |
+| Text chat | Double-click uses the AI setting for either a lightweight bubble or the full chat window. Both views use the same in-memory DeepSeek session; no speech or microphone is used |
+| Bubble chat | Shows the latest 3, 4, or 5 messages (5 by default). Dismissal can be click-outside, click-outside or 15 seconds idle, or about 20 seconds after a reply |
+| Chat context | Keeps the last 20 successful turns for the current app session. Switching views and reopening either view keeps the same context; a new chat starts fresh, and quitting the app clears it. Chat records are never written to disk |
+| Right-click menu | Separate lightweight bubble chat and full chat window commands, plus pause/resume walking, sleep/wake, independent left/right speed settings, and exit |
+| Notification area | Tray icon with separate lightweight bubble chat and full chat window commands plus exit |
 | Persistence | Monitor, horizontal position, paused/sleeping state, and left/right speeds are restored on next launch |
 | Multi-monitor | Remembers the monitor by device name, handles negative (left-of-primary) coordinates, and converts coordinates DPI-aware so mixed-scale setups place correctly |
 | Display changes | Re-clamps to the bottom edge when the display configuration changes |

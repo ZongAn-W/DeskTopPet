@@ -11,6 +11,34 @@ namespace DesktopPet.Windows.Tests;
 public sealed class PetWindowChatRoutingTests
 {
     [Fact]
+    public void DefaultEntryUsesBubbleWhenSettingsSelectBubble()
+    {
+        RunOnSta(() =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"desktop-pet-default-bubble-{Guid.NewGuid():N}.bin");
+            var store = new ChatSettingsStore(path);
+            store.Save(new ChatSettings { ApiKey = "routing-test-key", DefaultPresentation = ChatPresentationMode.Bubble });
+            using var runtime = new ChatRuntime(new HttpClient(new StubHandler()), store);
+            var pet = new PetWindow(runtime);
+            try
+            {
+                pet.Show();
+                pet.OpenDefaultChat();
+                var bubble = GetField<BubbleChatWindow>(pet, "_bubbleWindow");
+                Assert.NotNull(bubble);
+                Assert.True(bubble!.IsVisible);
+                Assert.Null(GetField<ChatWindow>(pet, "_chatWindow"));
+            }
+            finally
+            {
+                GetField<BubbleChatWindow>(pet, "_bubbleWindow")?.CloseForExit();
+                if (pet.IsVisible) pet.Close();
+                File.Delete(path);
+            }
+        });
+    }
+
+    [Fact]
     public void DefaultEntryUsesConfiguredPresentationAndExplicitEntriesSwitchViews()
     {
         RunOnSta(() =>
@@ -81,6 +109,42 @@ public sealed class PetWindowChatRoutingTests
             Assert.Contains("轻量气泡聊天", headers);
             Assert.Contains("完整聊天窗口", headers);
             File.Delete(path);
+        });
+    }
+
+    [Fact]
+    public void PetWindowTrayCommandsOpenTheMatchingViews()
+    {
+        RunOnSta(() =>
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"desktop-pet-tray-routing-{Guid.NewGuid():N}.bin");
+            using var runtime = new ChatRuntime(new HttpClient(new StubHandler()), new ChatSettingsStore(path));
+            var pet = new PetWindow(runtime);
+            try
+            {
+                pet.Show();
+                var tray = GetField<TrayController>(pet, "_tray");
+                Assert.NotNull(tray);
+                var bubbleItem = tray!.ContextMenuStrip.Items
+                    .OfType<System.Windows.Forms.ToolStripMenuItem>()
+                    .Single(item => item.Text == "轻量气泡聊天");
+                var fullItem = tray.ContextMenuStrip.Items
+                    .OfType<System.Windows.Forms.ToolStripMenuItem>()
+                    .Single(item => item.Text == "完整聊天窗口");
+
+                bubbleItem.PerformClick();
+                Assert.True(GetField<BubbleChatWindow>(pet, "_bubbleWindow")?.IsVisible);
+                fullItem.PerformClick();
+                Assert.True(GetField<ChatWindow>(pet, "_chatWindow")?.IsVisible);
+                Assert.False(GetField<BubbleChatWindow>(pet, "_bubbleWindow")?.IsVisible == true);
+            }
+            finally
+            {
+                GetField<ChatWindow>(pet, "_chatWindow")?.CloseForExit();
+                GetField<BubbleChatWindow>(pet, "_bubbleWindow")?.CloseForExit();
+                if (pet.IsVisible) pet.Close();
+                File.Delete(path);
+            }
         });
     }
 

@@ -2,6 +2,14 @@
 
 这份文档用于记录每次开发后的实现结果、验证方式和后续注意事项。后续工作完成后，请在顶部追加一条记录。
 
+## 2026-10-04: Configurable bubble and full-window chat
+
+- `PetWindow` now owns one shared `ChatRuntime`; `ChatWindow` and `BubbleChatWindow` are presentation views over that runtime.
+- AI settings choose the double-click default, bubble message count (3/4/5, default 5), and one of three dismissal rules.
+- Right-click and tray menus always expose separate lightweight bubble and full-window chat commands. Switching views preserves the current in-memory session.
+- Chat records remain memory-only. Existing encrypted AI settings persistence, cancellation, draft recovery, Enter/Shift+Enter behavior, and API contract remain unchanged.
+- Validation: `dotnet test DesktopPet.sln --no-restore` and `dotnet build DesktopPet.sln --no-restore -c Release`.
+
 ## 2026-10-03：接入 DeepSeek 纯文字聊天
 
 ### 用户需求
