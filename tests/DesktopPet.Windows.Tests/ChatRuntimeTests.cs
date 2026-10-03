@@ -139,9 +139,10 @@ public sealed class ChatRuntimeTests
         var releaseResponse = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            using var runtime = CreateRuntime(store, async (_, _) =>
+            using var runtime = CreateRuntime(store, async (_, token) =>
             {
                 entered.SetResult();
+                using var registration = token.Register(() => releaseResponse.TrySetCanceled(token));
                 return await releaseResponse.Task;
             });
 
@@ -152,7 +153,7 @@ public sealed class ChatRuntimeTests
 
             Assert.True(runtime.IsBusy);
             await Assert.ThrowsAsync<InvalidOperationException>(() => runtime.SendAsync("new conversation", default));
-            releaseResponse.SetResult(Ok("late reply"));
+            releaseResponse.TrySetResult(Ok("late reply"));
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => activeRequest);
 
             Assert.False(runtime.IsBusy);

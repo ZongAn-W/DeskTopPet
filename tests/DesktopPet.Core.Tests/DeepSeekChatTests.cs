@@ -132,6 +132,27 @@ public sealed class DeepSeekChatTests
         Assert.Empty(session.Messages);
     }
 
+    [Fact]
+    public async Task ClearDuringPendingReplyPreventsOldTurnFromEnteringNewContext()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new ResponseHandler(async (_, _) =>
+        {
+            started.TrySetResult();
+            return await release.Task;
+        }));
+        var session = new ChatSession(new DeepSeekChatClient(http));
+
+        var pending = session.SendAsync("old turn", Settings, default);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        session.Clear();
+        release.SetResult(JsonResponse("""{"choices":[{"message":{"content":"late"}}]}"""));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Empty(session.Messages);
+    }
+
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, Encoding.UTF8, "application/json")

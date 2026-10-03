@@ -7,9 +7,9 @@ namespace DesktopPet;
 
 public sealed class ChatRuntime : IDisposable
 {
-    private const string AssistantSpeaker = "濂?";
-    private const string UserSpeaker = "浣?";
-    private const string Greeting = "浣犲ソ鍛€锛屾垜鍦ㄨ繖閲屻€備綘鍙互鍜屾垜鑱婅亰浠婂ぉ鐨勪簨銆?";
+    private const string AssistantSpeaker = "她";
+    private const string UserSpeaker = "你";
+    private const string Greeting = "你好呀，我在这里。你可以和我聊聊今天的事。";
     private readonly ChatSettingsStore _settingsStore;
     private readonly object _gate = new();
     private readonly HttpClient _http;
