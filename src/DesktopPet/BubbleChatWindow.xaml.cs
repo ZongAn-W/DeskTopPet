@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using DesktopPet.Core;
 
@@ -34,10 +36,10 @@ public partial class BubbleChatWindow : Window
         _timerFactory = timerFactory ?? throw new ArgumentNullException(nameof(timerFactory));
         InitializeComponent();
         MessagesList.ItemsSource = _visibleEntries;
-        StatusText.Text = _runtime.SettingsLoadError
+        SetStatus(_runtime.SettingsLoadError
             ?? (string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey)
                 ? "请在完整聊天窗口中填写 DeepSeek API 密钥。"
-                : "Enter 发送，Shift+Enter 换行。");
+                : null));
         _runtime.StateChanged += OnRuntimeStateChanged;
         Deactivated += (_, _) => HandleDeactivated();
         Loaded += (_, _) => { InputBox.Focus(); RefreshEntries(); UpdateBusyState(); };
@@ -47,6 +49,18 @@ public partial class BubbleChatWindow : Window
     }
 
     public event EventHandler? ExpandRequested;
+
+    public void SetTailSide(bool onLeft)
+    {
+        BubbleTail.HorizontalAlignment = onLeft ? System.Windows.HorizontalAlignment.Left : System.Windows.HorizontalAlignment.Right;
+        BubbleTail.RenderTransform = new ScaleTransform(onLeft ? 1 : -1, 1, 11, 0);
+    }
+
+    private void SetStatus(string? text)
+    {
+        StatusText.Text = text ?? "";
+        StatusText.Visibility = string.IsNullOrWhiteSpace(text) ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     public void CloseForExit()
     {
@@ -88,10 +102,14 @@ public partial class BubbleChatWindow : Window
     {
         if (_closed) return;
         var busy = _runtime.IsBusy;
-        SendButton.Content = busy ? "取消" : "发送";
+        SendButton.Content = busy ? "■" : "↑";
+        SendButton.FontSize = busy ? 13 : 22;
+        SendButton.ToolTip = busy ? "取消回复" : "发送";
+        AutomationProperties.SetName(SendButton, busy ? "取消回复" : "发送");
         NewChatButton.IsEnabled = ExpandButton.IsEnabled = !busy;
         InputBox.IsReadOnly = busy;
         if (busy) StopDismissTimer();
+        else if (_runtime.MemoryError is not null) SetStatus(_runtime.MemoryError);
     }
 
     private async void OnSend(object sender, RoutedEventArgs e) => await SendAsync();
@@ -116,38 +134,38 @@ public partial class BubbleChatWindow : Window
         if (text.Length == 0) return;
         if (string.IsNullOrWhiteSpace(_runtime.Settings.ApiKey))
         {
-            StatusText.Text = "请在完整聊天窗口中填写 DeepSeek API 密钥。";
+            SetStatus("请在完整聊天窗口中填写 DeepSeek API 密钥。");
             return;
         }
 
         StopDismissTimer();
         _replyCompleted = false;
         InputBox.Clear();
-        StatusText.Text = "她正在想怎么回答你…";
+        SetStatus("她正在想怎么回答你…");
         UpdateBusyState();
         try
         {
             await _runtime.SendAsync(text, CancellationToken.None);
             if (_closed) return;
             _replyCompleted = true;
-            StatusText.Text = "Enter 发送，Shift+Enter 换行。";
+            SetStatus(_runtime.MemoryError);
             StartDismissTimer(afterReply: true);
         }
         catch (OperationCanceledException)
         {
             if (!_closed)
             {
-                StatusText.Text = "已取消，可以修改内容后重新发送。";
+                SetStatus("已取消，可以修改内容后重新发送。");
                 InputBox.Text = text;
             }
         }
         catch (ChatServiceException error)
         {
-            if (!_closed) { StatusText.Text = error.Message; InputBox.Text = text; }
+            if (!_closed) { SetStatus(error.Message); InputBox.Text = text; }
         }
         catch (Exception error) when (error is ArgumentException or InvalidOperationException)
         {
-            if (!_closed) { StatusText.Text = "请求未完成，请检查 AI 设置后重试。"; InputBox.Text = text; }
+            if (!_closed) { SetStatus("请求未完成，请检查 AI 设置后重试。"); InputBox.Text = text; }
         }
         finally
         {
@@ -171,7 +189,7 @@ public partial class BubbleChatWindow : Window
         StopDismissTimer();
         _runtime.Clear();
         _replyCompleted = false;
-        StatusText.Text = "这次对话会从这里开始。";
+        SetStatus(null);
         InputBox.Clear();
         InputBox.Focus();
     }
@@ -212,6 +230,7 @@ public partial class BubbleChatWindow : Window
             _runtime.Settings.BubbleDismiss == BubbleDismissMode.ClickOutsideOrIdle)
         {
             StopDismissTimer();
+            _ = _runtime.EndConversationAsync();
             Hide();
         }
     }
@@ -233,6 +252,7 @@ public partial class BubbleChatWindow : Window
     {
         if (_runtime.IsBusy) return;
         StopDismissTimer();
+        _ = _runtime.EndConversationAsync();
         Hide();
     }
 
@@ -245,6 +265,7 @@ public partial class BubbleChatWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _ = _runtime.EndConversationAsync();
         if (_exitRequested) return;
         e.Cancel = true;
         _runtime.Cancel();

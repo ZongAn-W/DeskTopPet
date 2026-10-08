@@ -13,12 +13,15 @@ public sealed class ChatRuntime : IDisposable
     private readonly ChatSettingsStore _settingsStore;
     private readonly object _gate = new();
     private readonly HttpClient _http;
+    private readonly ChatMemory _memory;
+    private readonly CancellationTokenSource _memoryStop = new();
+    private Task _memoryWork = Task.CompletedTask;
     private RequestState? _request;
     private bool _disposed;
     private bool _httpDisposed;
     private ChatSettings _settings;
 
-    public ChatRuntime(HttpClient http, ChatSettingsStore settingsStore)
+    public ChatRuntime(HttpClient http, ChatSettingsStore settingsStore, ChatMemoryStore? memoryStore = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _settingsStore = settingsStore ?? throw new ArgumentNullException(nameof(settingsStore));
@@ -32,15 +35,20 @@ public sealed class ChatRuntime : IDisposable
             SettingsLoadError = error.Message;
         }
 
-        Session = new ChatSession(new DeepSeekChatClient(_http));
+        var client = new DeepSeekChatClient(_http);
+        Session = new ChatSession(client);
+        _memory = new ChatMemory(client, memoryStore ?? new ChatMemoryStore(settingsStore.MemoryPath));
         Entries = [];
         AddGreeting();
+        _memoryWork = RetryMemoryAsync();
     }
 
     public ChatSession Session { get; }
     internal ChatSettingsStore SettingsStore => _settingsStore;
     public ChatSettings Settings => _settings;
     public string? SettingsLoadError { get; }
+    public string MemoryPath => _memory.DocumentPath;
+    public string? MemoryError => _memory.LastError is null ? null : "记忆暂未更新，待整理内容已保留。下次关闭聊天时会重试，请检查网络和文件权限。";
     public ObservableCollection<ChatEntry> Entries { get; }
     public bool IsBusy
     {
@@ -74,12 +82,14 @@ public sealed class ChatRuntime : IDisposable
 
         try
         {
-            var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token).ConfigureAwait(true);
+            await _memoryWork.WaitAsync(request.Source.Token).ConfigureAwait(true);
+            var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token, _memory.ReadDocument()).ConfigureAwait(true);
             lock (_gate)
             {
                 if (ReferenceEquals(_request, request) && !request.Invalidated && !_disposed)
                 {
                     Entries.Add(new ChatEntry(AssistantSpeaker, reply, "#FFFFFF") { Role = "assistant" });
+                    _memory.RecordTurn(trimmed, reply);
                 }
             }
             NotifyStateChanged();
@@ -119,6 +129,7 @@ public sealed class ChatRuntime : IDisposable
     public void Clear()
     {
         ThrowIfDisposed();
+        _ = EndConversationAsync();
         RequestState? request;
         lock (_gate)
         {
@@ -140,7 +151,29 @@ public sealed class ChatRuntime : IDisposable
         var normalized = (settings ?? throw new ArgumentNullException(nameof(settings))).Normalize();
         _settingsStore.Save(normalized);
         lock (_gate) _settings = normalized;
+        _memoryWork = RetryMemoryAsync();
         NotifyStateChanged();
+    }
+
+    public Task EndConversationAsync()
+    {
+        if (_disposed) return Task.CompletedTask;
+        _memoryWork = SaveMemoryAsync();
+        return _memoryWork;
+    }
+
+    public void EnsureMemoryDocumentExists() => _memory.EnsureDocumentExists();
+
+    private async Task SaveMemoryAsync()
+    {
+        await _memory.EndConversationAsync(Settings, _memoryStop.Token).ConfigureAwait(false);
+        if (!_disposed) NotifyStateChanged();
+    }
+
+    private async Task RetryMemoryAsync()
+    {
+        await _memory.RetryPendingAsync(Settings, _memoryStop.Token).ConfigureAwait(false);
+        if (!_disposed) NotifyStateChanged();
     }
 
     public void Dispose()
@@ -157,6 +190,8 @@ public sealed class ChatRuntime : IDisposable
         }
         try { request?.Source.Cancel(); }
         catch (ObjectDisposedException) { }
+        _memoryStop.Cancel();
+        _ = _memoryWork.ContinueWith(_ => DisposeHttpIfNeeded(), TaskScheduler.Default);
         DisposeHttpIfNeeded();
     }
 
@@ -173,10 +208,11 @@ public sealed class ChatRuntime : IDisposable
     {
         lock (_gate)
         {
-            if (!_disposed || _request is not null || _httpDisposed) return;
+            if (!_disposed || _request is not null || !_memoryWork.IsCompleted || _httpDisposed) return;
             _httpDisposed = true;
         }
         _http.Dispose();
+        _memoryStop.Dispose();
     }
 
     private void NotifyStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);

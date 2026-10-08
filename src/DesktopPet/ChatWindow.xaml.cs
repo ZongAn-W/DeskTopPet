@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
@@ -55,6 +57,7 @@ public partial class ChatWindow : Window
         SettingsButton.IsEnabled = NewChatButton.IsEnabled = !busy;
         InputBox.IsReadOnly = busy;
         if (!busy) Dispatcher.BeginInvoke(() => ChatScroll.ScrollToEnd());
+        if (!busy && _runtime.MemoryError is not null) StatusText.Text = _runtime.MemoryError;
         ConversationActivity?.Invoke(this, EventArgs.Empty);
     }
 
@@ -87,7 +90,7 @@ public partial class ChatWindow : Window
         {
             await _runtime.SendAsync(text, CancellationToken.None);
             if (_closed) return;
-            StatusText.Text = "Enter 发送，Shift+Enter 换行。";
+            StatusText.Text = _runtime.MemoryError ?? "Enter 发送，Shift+Enter 换行。";
         }
         catch (OperationCanceledException)
         {
@@ -109,6 +112,19 @@ public partial class ChatWindow : Window
 
     private void OnSettings(object sender, RoutedEventArgs e) => OpenSettings();
 
+    private void OnMemory(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _runtime.EnsureMemoryDocumentExists();
+            Process.Start(new ProcessStartInfo(_runtime.MemoryPath) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            StatusText.Text = "无法打开记忆文档，请检查文件权限和 Markdown 文件的默认打开程序。";
+        }
+    }
+
     private void OpenSettings()
     {
         var dialog = new ChatSettingsWindow(_runtime.Settings, _runtime.SettingsStore) { Owner = this };
@@ -128,6 +144,7 @@ public partial class ChatWindow : Window
 
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
+        _ = _runtime.EndConversationAsync();
         if (_exitRequested) return;
         e.Cancel = true;
         _runtime.Cancel();

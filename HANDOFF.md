@@ -2,6 +2,14 @@
 
 这份文档用于记录每次开发后的实现结果、验证方式和后续注意事项。后续工作完成后，请在顶部追加一条记录。
 
+## 2026-10-05：聊天气泡改为「柔和陪伴」样式
+
+- 气泡使用透明窗口、暖白圆角面板、轻阴影和指向人物的小尾巴；用户消息淡紫靠右，人物回复留白显示，正文仍可选择复制。
+- 顶部改为「我在这里」和带提示的图标按钮；输入区整合发送键，空白时显示占位提示，发送中切换为停止图标。快捷键说明移到输入区提示，状态行只在请求中或需要提示时显示。
+- 窗口高度随消息和多行草稿变化，最高520 DIP；长回复使用细滚动条。靠近屏幕右边缘时换到人物左侧，尾巴同步翻转；窗口尺寸和人物位置变化时重新定位。
+- 验证：`dotnet test DesktopPet.sln --no-restore --disable-build-servers -m:1`，133项核心测试和33项 Windows 测试通过，共166项；`publish.ps1` 完成 Release 自包含发布至 `publish/win-x64-current/DesktopPet.exe`。
+- 本地 WPF 布局检查覆盖默认宽度、300 DIP窄窗口、长回复、多行输入和尾巴翻转；检查图片在 `artifacts/bubble-qa/`。实际窗口内容高度从316 DIP增长到516 DIP，输入区完整可见。
+
 ## 2026-10-04: Configurable bubble and full-window chat
 
 - `PetWindow` now owns one shared `ChatRuntime`; `ChatWindow` and `BubbleChatWindow` are presentation views over that runtime.

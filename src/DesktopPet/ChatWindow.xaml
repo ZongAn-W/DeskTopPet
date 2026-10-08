@@ -26,6 +26,8 @@
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button x:Name="NewChatButton" Content="新对话" Click="OnNewChat"/>
                 <Button x:Name="SettingsButton" Content="AI 设置" Click="OnSettings"/>
+                <Button x:Name="MemoryButton" Content="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16"
+                        Padding="9,6" ToolTip="打开记忆文档" Click="OnMemory"/>
             </StackPanel>
         </DockPanel>
         <ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">

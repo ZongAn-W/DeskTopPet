@@ -7,7 +7,7 @@ public sealed class ChatSession(DeepSeekChatClient client)
     private long _generation;
     public IReadOnlyList<ChatMessage> Messages => _messages.AsReadOnly();
 
-    public async Task<string> SendAsync(string text, ChatSettings settings, CancellationToken cancellationToken)
+    public async Task<string> SendAsync(string text, ChatSettings settings, CancellationToken cancellationToken, string? memory = null)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new ChatServiceException("请输入想说的话。");
         var user = new ChatMessage("user", text.Trim());
@@ -18,7 +18,7 @@ public sealed class ChatSession(DeepSeekChatClient client)
             generation = _generation;
             context = _messages.Append(user).ToArray();
         }
-        var reply = await client.ReplyAsync(settings, context, cancellationToken);
+        var reply = await client.ReplyAsync(settings, context, cancellationToken, memory);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {

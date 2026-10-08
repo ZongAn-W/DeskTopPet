@@ -10,6 +10,10 @@ public sealed class ChatSettingsStore(string? path = null)
     private readonly string _path = path ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DesktopPet", "ai-settings.bin");
 
+    internal string MemoryPath => path is null
+        ? Path.Combine(Path.GetDirectoryName(_path)!, "memory.md")
+        : _path + ".memory.md";
+
     public ChatSettings Load()
     {
         if (!File.Exists(_path)) return new();

@@ -78,6 +78,10 @@ public partial class PetWindow : Window
         MouseMove += OnMouseMove;
         MouseLeftButtonUp += OnMouseLeftButtonUp;
         MouseRightButtonUp += (_, e) => { ContextMenu.IsOpen = true; e.Handled = true; };
+        LocationChanged += (_, _) =>
+        {
+            if (_bubbleWindow?.IsVisible == true) PositionBubbleChat(_bubbleWindow);
+        };
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += OnTick;
     }
@@ -323,14 +327,14 @@ public partial class PetWindow : Window
             _bubbleWindow.Activate();
             return;
         }
-        var area = CurrentMonitor().WorkingArea;
         var bubble = new BubbleChatWindow(_chatRuntime) { Owner = this };
-        bubble.Left = Math.Clamp(Left + PetWidth + 12, area.Left, Math.Max(area.Left, area.Right - bubble.Width));
-        bubble.Top = Math.Clamp(Top + PetHeight - bubble.Height, area.Top, Math.Max(area.Top, area.Bottom - bubble.Height));
+        PositionBubbleChat(bubble);
+        bubble.SizeChanged += (_, _) => PositionBubbleChat(bubble);
         bubble.ExpandRequested += (_, _) => OpenFullChat();
         bubble.IsVisibleChanged += (_, _) =>
         {
-            if (!bubble.IsVisible) _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
+            if (bubble.IsVisible) PositionBubbleChat(bubble);
+            else _nextWalk = StrollSchedule.NextWalkTime(DateTime.UtcNow, Random.Shared);
         };
         bubble.Closed += (_, _) =>
         {
@@ -339,6 +343,21 @@ public partial class PetWindow : Window
         };
         _bubbleWindow = bubble;
         bubble.Show();
+    }
+
+    private void PositionBubbleChat(BubbleChatWindow bubble)
+    {
+        var area = CurrentMonitor().WorkingArea;
+        bubble.MaxHeight = Math.Min(520, area.Height);
+        var width = bubble.ActualWidth > 0 ? bubble.ActualWidth : bubble.Width;
+        var height = bubble.ActualHeight > 0 ? bubble.ActualHeight : bubble.MinHeight;
+        var right = Left + PetWidth / 2 + 16;
+        var left = Left + PetWidth / 2 - 16 - width;
+        var onRight = right + width <= area.Right || left < area.Left;
+        bubble.SetTailSide(onLeft: onRight);
+        bubble.Left = Math.Clamp(onRight ? right : left, area.Left, Math.Max(area.Left, area.Right - width));
+        // Keep the tail near the character's face as the conversation grows upward.
+        bubble.Top = Math.Clamp(Top + 76 - height, area.Top, Math.Max(area.Top, area.Bottom - height));
     }
 
     public void OpenFullChat()
@@ -438,6 +457,8 @@ public partial class PetWindow : Window
     /// </remarks>
     private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.BeginInvoke(ClampToCurrentMonitor);
 
+    private Task _exitMemoryTask = Task.CompletedTask;
+
     private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         if (_closing) return;
@@ -447,6 +468,7 @@ public partial class PetWindow : Window
             _exitAnimationStarted = true;
             _chatWindow?.CloseForExit();
             _bubbleWindow?.CloseForExit();
+            _exitMemoryTask = _chatRuntime.EndConversationAsync();
             Pet.BeginExternalAnimation("disappear.mov", CloseAfterExitAnimation);
             return;
         }
@@ -464,8 +486,10 @@ public partial class PetWindow : Window
         _chatRuntime.Dispose();
     }
 
-    private void CloseAfterExitAnimation()
+    private async void CloseAfterExitAnimation()
     {
+        try { await _exitMemoryTask.WaitAsync(TimeSpan.FromSeconds(15)); }
+        catch (TimeoutException) { }
         Close();
     }
 }
