@@ -1,10 +1,13 @@
 using System.Diagnostics;
 using System.IO;
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using DesktopPet.Core;
+
+[assembly: InternalsVisibleTo("DesktopPet.Windows.Tests")]
 
 namespace DesktopPet;
 
@@ -12,6 +15,12 @@ internal sealed record VideoClipDefinition(string FileName, int SkipFrames = 0, 
 
 internal static class VideoClipCatalog
 {
+    public static IReadOnlyList<PetState> StrollStates { get; } = Array.AsReadOnly(new[]
+    {
+        PetState.TurningLeft, PetState.WalkingLeft, PetState.TurningBack,
+        PetState.TurningRight, PetState.WalkingRight, PetState.StandingRight
+    });
+
     private static readonly IReadOnlyDictionary<PetState, VideoClipDefinition> Clips =
         new Dictionary<PetState, VideoClipDefinition>
         {
@@ -30,6 +39,97 @@ internal static class VideoClipCatalog
         };
 
     public static bool TryGet(PetState state, out VideoClipDefinition definition) => Clips.TryGetValue(state, out definition!);
+}
+
+/// <summary>
+/// Keeps complete, frozen clips for one visual's lifetime. Both foreground and prefetched decodes
+/// share the same two slots, so warming the walk set cannot launch a process for every clip at once.
+/// </summary>
+internal sealed class VideoFrameCache
+{
+    private sealed class Entry
+    {
+        public Task<IReadOnlyList<BitmapSource>> Load { get; set; } = null!;
+        public DateTimeOffset RetryAfter { get; set; } = DateTimeOffset.MaxValue;
+    }
+
+    private readonly object _gate = new();
+    private readonly Dictionary<PetState, Entry> _states = new();
+    private readonly SemaphoreSlim _decodeSlots = new(2);
+    private readonly Func<PetState, CancellationToken, Task<IReadOnlyList<BitmapSource>>> _decodeState;
+    private readonly Func<string, CancellationToken, Action<BitmapSource>?, Task<IReadOnlyList<BitmapSource>>> _decodeFile;
+    private readonly CancellationToken _lifetime;
+    private readonly Func<DateTimeOffset> _utcNow;
+
+    public VideoFrameCache(
+        Func<PetState, CancellationToken, Task<IReadOnlyList<BitmapSource>>> decodeState,
+        Func<string, CancellationToken, Action<BitmapSource>?, Task<IReadOnlyList<BitmapSource>>> decodeFile,
+        CancellationToken lifetime,
+        Func<DateTimeOffset>? utcNow = null)
+    {
+        _decodeState = decodeState;
+        _decodeFile = decodeFile;
+        _lifetime = lifetime;
+        _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+    }
+
+    public Task<IReadOnlyList<BitmapSource>> GetOrLoad(PetState state)
+    {
+        lock (_gate)
+        {
+            if (_states.TryGetValue(state, out var existing) && _utcNow() < existing.RetryAfter)
+                return existing.Load;
+
+            var entry = new Entry();
+            _states[state] = entry;
+            entry.Load = Task.Run(async () =>
+            {
+                var frames = await DecodeAsync(token => _decodeState(state, token), _lifetime);
+                if (frames.Count == 0)
+                {
+                    lock (_gate) entry.RetryAfter = _utcNow().AddSeconds(5);
+                }
+                return frames;
+            });
+            return entry.Load;
+        }
+    }
+
+    public Task<IReadOnlyList<BitmapSource>> LoadFileAsync(
+        string fileName, CancellationToken cancellationToken, Action<BitmapSource>? onFirstFrame = null) =>
+        DecodeAsync(token => _decodeFile(fileName, token, onFirstFrame), cancellationToken);
+
+    private async Task<IReadOnlyList<BitmapSource>> DecodeAsync(
+        Func<CancellationToken, Task<IReadOnlyList<BitmapSource>>> decode,
+        CancellationToken cancellationToken)
+    {
+        var acquired = false;
+        try
+        {
+            await _decodeSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = true;
+            cancellationToken.ThrowIfCancellationRequested();
+            var decoded = await decode(cancellationToken).ConfigureAwait(false);
+            var frames = decoded.ToArray();
+            foreach (var frame in frames)
+                if (!frame.IsFrozen) frame.Freeze();
+            return frames;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return Array.Empty<BitmapSource>();
+        }
+        catch (Exception)
+        {
+            // A missing or temporarily unavailable clip must not break the rendering loop. Failed
+            // state loads can be tried again after a short cooldown when the state is next entered.
+            return Array.Empty<BitmapSource>();
+        }
+        finally
+        {
+            if (acquired) _decodeSlots.Release();
+        }
+    }
 }
 
 internal static class VideoAssetResolver

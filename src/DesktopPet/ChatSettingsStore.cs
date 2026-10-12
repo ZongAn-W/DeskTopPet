@@ -14,6 +14,10 @@ public sealed class ChatSettingsStore(string? path = null)
         ? Path.Combine(Path.GetDirectoryName(_path)!, "memory.md")
         : _path + ".memory.md";
 
+    internal string EmotionPath => path is null
+        ? Path.Combine(Path.GetDirectoryName(_path)!, "emotion.json")
+        : _path + ".emotion.json";
+
     public ChatSettings Load()
     {
         if (!File.Exists(_path)) return new();

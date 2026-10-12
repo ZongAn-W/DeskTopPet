@@ -3,8 +3,8 @@
 A native Windows desktop pet built with WPF on .NET 8. A single transparent, always-on-top
 character lives on your desktop: she breathes and blinks while idle, strolls along the bottom
 edge of the active monitor's working area, reacts when you click her, falls asleep when ignored,
-and can be dragged between monitors. Optional text chat connects to DeepSeek when you send a
-message; pet animation and movement continue to work locally without an API account.
+and can be dragged between monitors. Optional text chat connects to DeepSeek for replies and
+conversation-end memory summaries; pet animation and movement work locally without an API account.
 
 The character art is derived from a reference photograph, but **the photograph itself is never
 bundled or read at runtime**. Only the cut-out, background-free PNG frames ship with the app.
@@ -24,7 +24,10 @@ bundled or read at runtime**. Only the cut-out, background-free PNG frames ship 
 | Pause | Freezes walking. A paused pet can still auto-sleep and still responds to clicks |
 | Text chat | Double-click uses the AI setting for either a lightweight bubble or the full chat window. Both views use the same in-memory DeepSeek session; no speech or microphone is used |
 | Bubble chat | Shows the latest 3, 4, or 5 messages (5 by default). Dismissal can be click-outside, click-outside or 15 seconds idle, or about 20 seconds after a reply |
-| Chat context | Keeps the last 20 successful turns for the current app session. Switching views and reopening either view keeps the same context; a new chat starts fresh, and quitting the app clears it. Chat records are never written to disk |
+| Chat context | Keeps the last 20 successful turns for the current app session. Switching views and reopening either view keeps the same context; a new chat or quitting clears this short-term context |
+| Long-term memory | Closing/dismissing chat, starting a new chat, or exiting summarizes useful facts into a local Markdown document. New chats and app restarts read these notes. Pending summaries survive network failures and restart |
+| Memory management | View and search notes by topic, edit/reclassify individual notes, add or delete notes, and pause automatic recording. Manual saves discard earlier unsummarized conversations so old summaries cannot restore deleted notes |
+| Emotions | Conversation changes her mood and reply style: calm, happy, sad, angry, shy or concerned. Both chat views show the shared mood; its strength develops gradually, recovers during idle time, and survives a new chat or restart |
 | Right-click menu | Separate lightweight bubble chat and full chat window commands, plus pause/resume walking, sleep/wake, independent left/right speed settings, and exit |
 | Notification area | Tray icon with separate lightweight bubble chat and full chat window commands plus exit |
 | Persistence | Monitor, horizontal position, paused/sleeping state, and left/right speeds are restored on next launch |
@@ -100,7 +103,7 @@ src/DesktopPet.Core/            Framework-independent logic (net8.0, no WPF)
 
 src/DesktopPet/                 WPF front end (net8.0-windows)
   App.xaml(.cs)                 Entry point; reports corrupt character art instead of crashing
-  PetWindow.xaml(.cs)           50 ms update tick, walking, drag/drop, monitor tracking, context menu
+  PetWindow.xaml(.cs)           Render-driven animation/travel; 50 ms scheduling, drag/drop, menus
   PetVisual.cs                  Renders sprite frames, or a vector placeholder when no art is present;
                                 owns the per-state animation clock
   SpriteAnimator.cs             Loads PNG frames per state folder (timing comes from AnimationTiming)
@@ -199,47 +202,33 @@ exposes the current leg as a `StrollPhase`. Which legs travel differs by directi
 
 | Phase | Sprite | Frames | Moves? |
 | --- | --- | --- | --- |
-| `TurningLeft` | `turn_left` | 66 | **no** |
-| `Starting` | `walk_start` | 62 | yes |
-| `Walking` | `walk_left`, looped | 93 × repeat count | yes |
-| `Stopping` | `walk_stop` | 32 | **no** |
-| `TurningBack` | `turn_back` | 57 | **no** |
-| `TurningRight` | `turn_right` | 95 | **no** |
-| `WalkingRight` | `walk_right` | 159 | yes |
-| `StandingRight` | `stand_right` | 18 | **no** |
+| `TurningLeft` | `left-walk-1.mov` | 29 after trim | **no** |
+| `Walking` | `left-walk-2.mov` | 175 after trim | yes |
+| `TurningBack` | `left-walk-3.mov` | 94 after trim | **no** |
+| `TurningRight` | `right-walk-1.mov` | 42 | **no** |
+| `WalkingRight` | `right-walk-2.mov` | 215 | yes |
+| `StandingRight` | `right-walk-3.mov` | 45 | **no** |
 
-`PetWindow` moves the window only while `StrollPhase` reports `IsMoving`. Leftward that is `Starting`
-and `Walking`; rightward only `WalkingRight` travels. The opening turn and final settle both play in
-place, while the rightward walk module already contains its turn back to the viewer. The two turns
-are acted in place.
+`PetWindow` moves only during the middle clip in either direction. Every clip plays once;
+`StrollRepeatCount` remains a compatibility setting and does not repeat the leftward video.
 
-**The two directions differ in one important way.** A leftward stroll repeats its walk cycle
-`StrollRepeatCount` times, so its distance is tunable; a rightward stroll is always a single fixed
-pass, because its walk module is a one-shot that must not be looped. Measured live on this machine:
-one left stroll travels about 262 px (66 in the walk-up plus 196 in two cycles); a right stroll is
-shorter because its final settle is acted in place.
+Animation, controller time and travel share `CompositionTarget.Rendering`. The 50 ms dispatcher
+timer only schedules strolls and updates tray state. Travel is elapsed seconds multiplied by speed,
+so timer delays and display refresh rates do not alter the intended travel rate. The right-click
+menu offers independent left/right speeds of 16, 24, 32 and 48 DIP/second, approximately preserving
+the old settings' measured pace. Existing saved values 1.0, 1.5, 2.0 and 3.0 remain compatible.
+`WalkMotion` carries subpixel distance forward and emits steps in physical pixels at the current
+display scale, avoiding the loss of fractional movement when native window positions snap.
 
-**Walk distance has three knobs.** `PetController.StrollRepeatCount` sets how many leftward walk
-cycles are played. The right-click menu sets leftward and rightward travel independently to `1.0`,
-`1.5`, `2.0` or `3.0` DIP per timer tick. Distance is speed times the moving window, so raising
-the speed or the leftward repeat count lengthens that stroll.
+The appearance animation starts preloading idle and all six stroll clips. Frozen video frames
+remain cached for the visual's lifetime; at most two clips decode concurrently. A phase waits for
+its complete clip before its controller, movement and playback clocks advance together. Switching
+back to a cached state restarts at frame zero without another FFmpeg process. Redraws are requested
+only when the displayed frame changes. The source videos still contain repeated frames (roughly
+24 distinct poses per second in a 30 fps stream); caching does not synthesize extra poses.
 
-**The per-tick step must be accumulated, not assigned.** Assigning a fractional DIP amount to
-`Window.Left` every tick looks right in the property but never reaches the screen: the window
-position is snapped, so a sub-pixel step is silently dropped and the pet crawls at a fixed rate no
-matter what the constant says. Measured here, `1.1` and `1.65` px/tick both travelled at exactly
-21 px/s until the leftover was carried forward. `_travelRemainder` holds the fraction and the window
-only moves by whole DIP. With that in place the effective rate is about **15 px/s per unit** of the
-constant. The selected left/right setting is accumulated separately so fractional movement is not
-lost when the window position is snapped to whole DIP values.
-
-**Watch out for the real tick length.** The dispatcher timer asks for 50 ms but actually fires at
-roughly **62 ms** here, so the speed is lower than `step / 0.05` would suggest. Tuning it by
-arithmetic alone will be off by around 25%; measure it, or use the table above.
-
-Strolls can go left or right when there is room on that side. When both sides are available, the
-current scheduler prefers a leftward stroll; the rightward speed setting is used whenever a
-rightward stroll starts.
+Stroll direction is sampled in proportion to the available room on each side. A side with less
+than 12 DIP of room is excluded, keeping the pet away from the working-area edges.
 
 **Every state must eventually be replaced with matching art.** The app tolerates missing states on
 purpose — refusing to start would leave you with no pet — so a partly-animated pet is a silent
@@ -366,12 +355,63 @@ build output.
 4. 保存后输入文字，按 Enter 发送；Shift+Enter 换行。等待时点击 **取消** 可取消请求。
 
 聊天只有文字回复，不使用麦克风或朗读。聊天窗口显示时暂停自动散步；关闭窗口后恢复散步。
-关闭窗口不会丢失本次运行中的聊天，**新对话** 或退出程序会清除上下文。聊天记录不写入磁盘。
+关闭窗口不会丢失本次运行中的聊天，**新对话** 或退出程序会清除最近20轮的短期上下文。
 密钥和 AI 设置通过当前 Windows 用户的 DPAPI 加密保存在
 `%LocalAppData%\DesktopPet\ai-settings.bin`，不写入源码或发布文件。
 请求使用 [DeepSeek 官方 Chat Completions 接口](https://api-docs.deepseek.com/api/create-chat-completion/)，
-仅在用户发送时将人物设定、最近的对话和当前消息提交给 DeepSeek。
+发送消息时将人物设定、记忆摘要、当前情绪、最近的对话和当前消息提交给 DeepSeek；对话结束时另外请求整理记忆。
 密钥错误、余额不足、请求频繁、网络失败或超时会显示提示，并保留草稿以便重试。
+
+### 人物情绪
+
+她根据对话含义和近期上下文判断自己的反应，在同一次 DeepSeek 请求中生成回复和下一步情绪。
+她的情绪不是用户心情的直接复制：例如用户倾诉困难时，她更可能担心并给予关心；引用小说台词不等于对她发火。
+AI 设置中的性格仍是回复基础，情绪调整她的语气、措辞和表达强度。
+
+| 情绪 | 回复风格 |
+| --- | --- |
+| 平静 | 自然、温和，直接回应当前话题 |
+| 开心 | 更轻快，带一点玩笑和分享的兴致 |
+| 低落 | 更安静、柔和，句子和语气有所收敛 |
+| 生气 | 克制、直接，表达不悦和边界，仍保持尊重 |
+| 害羞 | 略有迟疑、含蓄和柔和的回应 |
+| 担心 | 更细心、认真，关注困难并提供支持 |
+
+气泡和完整聊天窗口标题处显示同一个情绪，悬停可查看强度。
+新情绪的强度最高40，同一情绪每轮最多变化20；空闲每2分钟降低1点，低于15时恢复平静。
+空闲恢复在打开聊天或发送消息时重新计算。新对话只清除短期聊天，不重置情绪。
+情绪在回复成功后保存到 `%LocalAppData%\DesktopPet\emotion.json`，重启后延续并计算离开期间的恢复。
+请求失败、取消或被新对话作废的回复不会改变情绪；情绪文件损坏时恢复平静，不影响聊天和长期记忆。
+模型使用 JSON 响应模式，界面只显示自然语言回复，不展示情绪元数据；兼容端点返回纯文字时沿用当前情绪。
+情绪判断不增加一次独立的分类请求；对话结束时的记忆整理仍单独请求。
+
+### 长期记忆
+
+关闭完整聊天窗口、收起气泡、点击 **新对话** 或退出程序时，她会提炼这段对话的重点，
+合并进 `%LocalAppData%\DesktopPet\memory.md`。气泡和完整窗口之间切换不触发整理。
+整理对象是本段对话中所有成功的轮次，包括超出最近20轮上下文的早期内容；失败或取消的轮次不进入记忆。
+
+文档记录用户明确表达的偏好、重要事情、计划和约定，合并重复信息并更新被纠正的事实。
+下一次聊天会自动读取这份摘要，开始新对话或重启程序仍保留长期记忆。
+完整聊天窗口右上角的文档图标打开 **记忆管理** 面板。可以按原有主题查看和搜索，
+逐条修改内容或主题、添加和删除记忆；点击 **保存修改** 后写入文档，下次发送会读取。
+主题在单独的输入框设置，记忆内容使用普通文字；不支持在内容中粘贴 Markdown 标题或代码围栏。
+删除先留在草稿中，可以 **撤销修改**；关闭有未保存修改的面板时会提示保存或放弃。
+面板中的 **打开文档** 仍可用默认程序打开 Markdown，外部编辑后点击 **重新读取**。
+文档在编辑期间被后台整理或外部修改时，保存会拒绝覆盖，并保留面板草稿。
+
+手动保存以你的修改为准，会丢弃保存前尚未整理的对话（包括正在进行的旧摘要）；
+在保存前已经发出的聊天请求也不会在迟到后重新写入长期记忆。新的成功对话仍正常记录。
+取消勾选 **自动记录新记忆** 可暂停新记录和待办整理，已有记忆仍会用于回复；
+开关保存在本机加密设置中，重启后继续生效，重新开启时继续整理原先的待办。
+查看、搜索、编辑和保存不需要 API 请求，也不创建不存在的来源或日期。
+也可以在聊天中明确说“这件事不要记住”或“忘记这个偏好”，在对话结束时整理。
+
+`memory.md` 是可编辑的 UTF-8 明文文档。为防止整理失败丢失内容，待整理的成功对话暂存于
+同目录的 `memory.md.pending.json`，每段整理成功后移出待办文件；它不是永久聊天记录。
+整理请求失败时保留原有摘要及待处理内容，下次结束对话、保存 AI 设置或启动程序时重试。
+文件权限错误需要修复后重试；待办文件无法写入时，未整理内容只能在本次运行中保留。
+退出最多等待15秒完成整理，未完成部分留待下次启动；整理会产生额外的 DeepSeek API 请求。
 
 ### Pet preferences
 

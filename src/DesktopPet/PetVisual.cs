@@ -24,24 +24,39 @@ public sealed class PetVisual : FrameworkElement
     private double _phase;
     private PetState? _phaseState;
     private readonly CancellationTokenSource _lifetime = new();
-    private CancellationTokenSource? _videoCancellation;
+    private readonly VideoFrameCache _clips;
+    private CancellationTokenSource? _externalCancellation;
     private IReadOnlyList<BitmapSource> _videoFrames = Array.Empty<BitmapSource>();
     private BitmapSource? _displayFrame;
-    private Task<IReadOnlyList<BitmapSource>>? _videoLoad;
+    private Task<IReadOnlyList<BitmapSource>>? _stateLoad;
+    private Task<IReadOnlyList<BitmapSource>>? _externalLoad;
     private PetState _videoFrameState;
     private bool _waitingForVideo;
-    private bool _videoFirstFrameReady;
+    private bool _prefetchStarted;
     private bool _externalAnimationActive;
     private bool _externalAnimationReady;
     private double _externalPhase;
+    private int _externalGeneration;
     private bool _externalCompletionQueued;
     private Action? _externalAnimationCompleted;
     public PetState State { get; set; } = PetState.Idle;
     public bool FacingRight { get; set; } = true;
     public bool IsUsingVideo => _videoFrames.Count > 0;
+    public bool IsExternalAnimationActive => _externalAnimationActive;
+
+    /// <summary>
+    /// True after the current state's complete clip has been installed. Completed missing clips are
+    /// also ready, allowing the state machine to recover rather than wait forever for absent art.
+    /// </summary>
+    public bool IsStateAnimationReady =>
+        !_externalAnimationActive && _phaseState == State && !_waitingForVideo;
+
+    internal BitmapSource? CurrentFrame => _displayFrame;
+    internal double StateAnimationElapsed => _phase;
 
     public void BeginExternalAnimation(string fileName, Action? completed = null)
     {
+        var generation = ++_externalGeneration;
         _externalAnimationActive = true;
         _externalAnimationReady = false;
         _externalPhase = 0;
@@ -49,41 +64,58 @@ public sealed class PetVisual : FrameworkElement
         _externalAnimationCompleted = completed;
         _videoFrames = Array.Empty<BitmapSource>();
         _waitingForVideo = true;
-        _videoCancellation?.Cancel();
-        _videoCancellation?.Dispose();
-        _videoCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        var token = _videoCancellation.Token;
-        _videoLoad = VideoFrameDecoder.LoadFileAsync(fileName, token, firstFrame =>
+        _phaseState = null;
+        _externalCancellation?.Cancel();
+        _externalCancellation?.Dispose();
+        _externalCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _externalCancellation.Token;
+        _externalLoad = _clips.LoadFileAsync(fileName, token, firstFrame =>
             Dispatcher.BeginInvoke(new Action(() =>
             {
-                if (!_externalAnimationActive || _externalAnimationReady || token.IsCancellationRequested) return;
-                _videoFrames = [firstFrame];
-                _waitingForVideo = false;
-                InvalidateVisual();
+                if (generation != _externalGeneration || !_externalAnimationActive ||
+                    _externalAnimationReady || token.IsCancellationRequested) return;
+                SetDisplayFrame(firstFrame);
             })));
-        _ = _videoLoad.ContinueWith(_ => Dispatcher.BeginInvoke(new Action(InvalidateVisual)),
-            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        PrefetchStrollAnimations();
     }
 
-    public PetVisual()
+    public PetVisual() : this(
+        (state, token) => VideoFrameDecoder.LoadAsync(state, token),
+        (fileName, token, firstFrame) => VideoFrameDecoder.LoadFileAsync(fileName, token, firstFrame)) { }
+
+    internal PetVisual(
+        Func<PetState, CancellationToken, Task<IReadOnlyList<BitmapSource>>> decodeState,
+        Func<string, CancellationToken, Action<BitmapSource>?, Task<IReadOnlyList<BitmapSource>>> decodeFile)
     {
+        _clips = new VideoFrameCache(decodeState, decodeFile, _lifetime.Token);
         IsHitTestVisible = true;
         SnapsToDevicePixels = true;
     }
 
+    public void PrefetchStrollAnimations()
+    {
+        if (_prefetchStarted) return;
+        _prefetchStarted = true;
+        _ = _clips.GetOrLoad(PetState.Idle);
+        foreach (var state in VideoClipCatalog.StrollStates) _ = _clips.GetOrLoad(state);
+    }
+
     public void Advance(double seconds)
     {
+        seconds = double.IsFinite(seconds) ? Math.Max(0, seconds) : 0;
         if (_externalAnimationActive)
         {
-            if (_videoLoad is { IsCompleted: true } externalLoad)
+            var justBecameReady = false;
+            if (_externalLoad is { IsCompleted: true } externalLoad)
             {
-                _videoLoad = null;
+                _externalLoad = null;
                 if (externalLoad.Status == TaskStatus.RanToCompletion && externalLoad.Result.Count > 0)
                 {
                     _videoFrames = externalLoad.Result;
                     _externalAnimationReady = true;
                     _externalPhase = 0;
                     _waitingForVideo = false;
+                    justBecameReady = true;
                 }
                 else
                 {
@@ -95,58 +127,53 @@ public sealed class PetVisual : FrameworkElement
 
             if (_externalAnimationReady)
             {
-                _externalPhase += Math.Max(0, seconds);
+                if (!justBecameReady) _externalPhase += seconds;
+                SetDisplayFrame(_videoFrames[
+                    AnimationTiming.OneShotFrameIndex(_videoFrames.Count, _externalPhase, 30)]);
                 var duration = _videoFrames.Count / 30.0;
                 if (_externalPhase >= duration && !_externalCompletionQueued)
                 {
                     _externalCompletionQueued = true;
+                    var generation = _externalGeneration;
                     Dispatcher.BeginInvoke(
                         DispatcherPriority.ApplicationIdle,
-                        new Action(CompleteExternalAnimation));
+                        new Action(() =>
+                        {
+                            if (generation == _externalGeneration) CompleteExternalAnimation();
+                        }));
                 }
             }
 
-            InvalidateVisual();
             return;
         }
 
-        // The animation clock is per state, not global. One ever-growing shared counter made a
-        // one-shot sequence compute a frame index far past its end, clamp to its final frame, and
-        // sit there for the whole phase — the turns and the walk-up/walk-down showed a single still.
-        // Only the looping walk appeared to work, because wrapping hid the fault.
+        var stateJustBecameReady = false;
         if (State != _phaseState)
         {
             _phaseState = State;
-            // Hold the previous clip's last rendered frame while the next clip decodes. The left
-            // walk clips intentionally hand off through matching poses, so this avoids a transparent
-            // gap without showing a partially decoded frame.
+            _phase = 0;
+            // Keep the preceding pose visible until the whole next clip is ready. Playback and the
+            // controller can then start together, without freezing a lone first frame and jumping.
             _videoFrames = Array.Empty<BitmapSource>();
             _waitingForVideo = true;
-            _videoFirstFrameReady = false;
-            BeginVideoLoad(State);
+            _stateLoad = _clips.GetOrLoad(State);
         }
-        if (_videoFirstFrameReady && _videoFrames.Count > 0)
+        if (_stateLoad is { IsCompleted: true } load)
         {
-            _waitingForVideo = false;
-        }
-        if (_videoLoad is { IsCompletedSuccessfully: true } load && load.Result.Count > 0)
-        {
-            _videoFrames = load.Result;
+            _videoFrames = load.Status == TaskStatus.RanToCompletion
+                ? load.Result : Array.Empty<BitmapSource>();
+            _ = load.Exception;
             _videoFrameState = State;
-            _videoLoad = null;
+            _stateLoad = null;
             _waitingForVideo = false;
-            _videoFirstFrameReady = true;
+            _phase = 0;
+            stateJustBecameReady = true;
         }
-        else if (_videoLoad is { IsCompleted: true })
-        {
-            _videoLoad = null;
-            _videoFrames = Array.Empty<BitmapSource>();
-            _displayFrame = null;
-            _waitingForVideo = false;
-        }
-        if (!_waitingForVideo)
-            _phase += seconds;
-        InvalidateVisual();
+        if (_waitingForVideo) return;
+        if (!stateJustBecameReady) _phase += seconds;
+        SetDisplayFrame(_videoFrames.Count > 0
+            ? _videoFrames[AnimationTiming.FrameIndex(_videoFrameState, _videoFrames.Count, _phase)]
+            : null);
     }
 
     private void CompleteExternalAnimation()
@@ -155,40 +182,22 @@ public sealed class PetVisual : FrameworkElement
         _externalAnimationActive = false;
         _externalAnimationReady = false;
         _externalCompletionQueued = false;
+        _phaseState = null;
+        _videoFrames = Array.Empty<BitmapSource>();
+        _waitingForVideo = true;
         var completed = _externalAnimationCompleted;
         _externalAnimationCompleted = null;
         if (completed is not null)
             completed();
         else
-        {
-            _phaseState = State;
-            _phase = 0;
-            _waitingForVideo = true;
-            BeginVideoLoad(State);
-        }
-        InvalidateVisual();
+            Advance(0);
     }
 
-    private void BeginVideoLoad(PetState state)
+    private void SetDisplayFrame(BitmapSource? frame)
     {
-        _videoCancellation?.Cancel();
-        _videoCancellation?.Dispose();
-        _videoCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-        var token = _videoCancellation.Token;
-        _videoLoad = VideoFrameDecoder.LoadAsync(state, token, firstFrame =>
-            Dispatcher.BeginInvoke(new Action(() =>
-            {
-                if (token.IsCancellationRequested || State != state || _phaseState != state) return;
-                _videoFrames = [firstFrame];
-                _videoFrameState = state;
-                _phase = 0;
-                _videoFirstFrameReady = true;
-                _waitingForVideo = false;
-                InvalidateVisual();
-            })));
-        var load = _videoLoad;
-        _ = load.ContinueWith(_ => Dispatcher.BeginInvoke(new Action(InvalidateVisual)),
-            CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+        if (ReferenceEquals(_displayFrame, frame)) return;
+        _displayFrame = frame;
+        InvalidateVisual();
     }
 
     protected override HitTestResult? HitTestCore(PointHitTestParameters hitTestParameters)
@@ -215,25 +224,8 @@ public sealed class PetVisual : FrameworkElement
 
     protected override void OnRender(DrawingContext dc)
     {
-        if (_waitingForVideo)
-        {
-            if (_displayFrame is not null)
-                dc.DrawImage(_displayFrame, new Rect(0, 0, DesignWidth, DesignHeight));
-            return;
-        }
-        if (_videoFrames.Count > 0)
-        {
-            var frameIndex = _externalAnimationActive
-                ? _externalAnimationReady
-                    ? AnimationTiming.OneShotFrameIndex(_videoFrames.Count, _externalPhase, 30)
-                    : 0
-                    : AnimationTiming.FrameIndex(_videoFrameState, _videoFrames.Count, _phase);
-            _displayFrame = _videoFrames[frameIndex];
-            dc.DrawImage(_displayFrame,
-                new Rect(0, 0, DesignWidth, DesignHeight));
-            return;
-        }
-        // Video is the only animation source. A missing clip leaves the transparent canvas empty.
+        if (_displayFrame is not null)
+            dc.DrawImage(_displayFrame, new Rect(0, 0, DesignWidth, DesignHeight));
     }
 
     protected override void OnVisualParentChanged(DependencyObject oldParent)
@@ -241,7 +233,7 @@ public sealed class PetVisual : FrameworkElement
         if (Parent is null)
         {
             _lifetime.Cancel();
-            _videoCancellation?.Cancel();
+            _externalCancellation?.Cancel();
         }
         base.OnVisualParentChanged(oldParent);
     }

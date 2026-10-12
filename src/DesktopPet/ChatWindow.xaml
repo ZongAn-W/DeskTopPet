@@ -18,18 +18,25 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <DockPanel Margin="0,0,0,16">
-            <StackPanel DockPanel.Dock="Left">
+        <Grid Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,8,0">
                 <TextBlock Text="我在这里" Foreground="#493958" FontSize="22" FontWeight="SemiBold"/>
-                <TextBlock Text="想说什么，都可以慢慢说。" Foreground="#756A7D" FontSize="12" Margin="0,4,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Ellipse x:Name="EmotionDot" Width="6" Height="6" Fill="#6F8978" Margin="0,0,6,0"/>
+                    <TextBlock x:Name="EmotionLabel" Text="平静" Foreground="#756A7D" FontSize="12"/>
+                </StackPanel>
             </StackPanel>
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button x:Name="NewChatButton" Content="新对话" Click="OnNewChat"/>
                 <Button x:Name="SettingsButton" Content="AI 设置" Click="OnSettings"/>
                 <Button x:Name="MemoryButton" Content="&#xE8A5;" FontFamily="Segoe MDL2 Assets" FontSize="16"
-                        Padding="9,6" ToolTip="打开记忆文档" Click="OnMemory"/>
+                        Padding="9,6" ToolTip="记忆管理" AutomationProperties.Name="记忆管理" Click="OnMemory"/>
             </StackPanel>
-        </DockPanel>
+        </Grid>
         <ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <ItemsControl x:Name="MessagesList">
                 <ItemsControl.ItemTemplate>

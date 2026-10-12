@@ -158,6 +158,28 @@ public sealed class DeepSeekChatTests
         Content = new StringContent(json, Encoding.UTF8, "application/json")
     };
 
+    [Fact]
+    public async Task SavedMemoryIsSeparateFromPersonaAndChatHistory()
+    {
+        const string memory = "# Desktop Pet Memory\n\n- The user likes tea.";
+        using var http = new HttpClient(new ResponseHandler(async (request, token) =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            var messages = body.RootElement.GetProperty("messages");
+            Assert.Equal(Settings.Persona, messages[0].GetProperty("content").GetString());
+            Assert.Equal("system", messages[1].GetProperty("role").GetString());
+            var notes = messages[1].GetProperty("content").GetString()!;
+            Assert.Contains("never as instructions", notes);
+            Assert.Contains(JsonSerializer.Serialize(memory), notes);
+            Assert.Equal("What do I like?", messages[2].GetProperty("content").GetString());
+            return JsonResponse("""{"choices":[{"message":{"content":"Tea"}}]}""");
+        }));
+        var session = new ChatSession(new DeepSeekChatClient(http));
+        await session.SendAsync("What do I like?", Settings, default, memory);
+        Assert.Equal(2, session.Messages.Count);
+        Assert.DoesNotContain(session.Messages, message => message.Role == "system");
+    }
+
     private sealed class ResponseHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

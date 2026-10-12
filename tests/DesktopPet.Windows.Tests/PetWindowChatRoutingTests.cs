@@ -73,6 +73,8 @@ public sealed class PetWindowChatRoutingTests
                 pet.OpenFullChat();
                 Assert.True(full.IsVisible);
                 Assert.False(bubble.IsVisible);
+                Assert.False(File.Exists(runtime.MemoryPath));
+                Assert.False(File.Exists(runtime.MemoryPath + ".pending.json"));
                 Assert.Same(runtime.Entries, ((ItemsControl)full.FindName("MessagesList")).ItemsSource);
                 var fullInput = (TextBox)full.FindName("InputBox");
                 fullInput.Text = "from full";

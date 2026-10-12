@@ -11,6 +11,7 @@ public sealed record ChatSettings
     public ChatPresentationMode DefaultPresentation { get; init; } = ChatPresentationMode.Bubble;
     public int BubbleMessageCount { get; init; } = 5;
     public BubbleDismissMode BubbleDismiss { get; init; } = BubbleDismissMode.ClickOutside;
+    public bool MemoryRecordingEnabled { get; init; } = true;
     public ChatSettings Normalize() => this with
     {
         DefaultPresentation = Enum.IsDefined(DefaultPresentation) ? DefaultPresentation : ChatPresentationMode.Bubble,

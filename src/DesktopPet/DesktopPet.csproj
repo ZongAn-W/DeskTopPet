@@ -20,7 +20,8 @@
          holds only subfolders, so this cannot pick up loose stray images. -->
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Assets\Video\LeftWalk\*.mov" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Video\LeftWalk\*.mov" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Include="Assets\Video\RightWalk\*.mov" CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>

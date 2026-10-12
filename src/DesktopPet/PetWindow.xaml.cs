@@ -17,22 +17,12 @@ public partial class PetWindow : Window
 {
     private const double PetWidth = 180;
     private const double PetHeight = 210;
-    // Travel speed is configured independently for each direction, in DIP per tick.
-    //
-    // This must be accumulated rather than assigned straight to Window.Left. Assigning a fractional
-    // amount every tick looks right in the property but never reaches the screen: the window position
-    // is snapped, so a sub-pixel step is silently dropped and the pet crawls at a fixed rate no matter
-    // what the setting says. Measured here, 1.1 and 1.65 px/tick both travelled at 21 px/s until the
-    // leftover was carried forward.
-    //
-    // With the remainder carried, the effective rate is about 15 px/s per unit at the default timer
-    // cadence. The right-click menu exposes the supported values for each direction.
+    // Stored speed options retain their old values; travel uses DIP per second at render cadence.
     private double _leftWalkSpeed = WalkSpeedOptions.Default;
     private double _rightWalkSpeed = WalkSpeedOptions.Default;
     private MenuItem? _leftSpeedMenu;
     private MenuItem? _rightSpeedMenu;
-    // Leftover DIP from the previous tick, carried forward so no fraction of a step is lost.
-    private double _travelRemainder;
+    private readonly WalkMotion _walkMotion = new();
     // Do not start a stroll with less than this much room in its direction, so it always visibly
     // travels instead of grinding against the edge of the working area.
     private const double MinStrollRoomPx = 12;
@@ -44,7 +34,6 @@ public partial class PetWindow : Window
     private ChatWindow? _chatWindow;
     private BubbleChatWindow? _bubbleWindow;
     private bool _openingChat;
-    private DateTime _lastTick = DateTime.UtcNow;
     private TimeSpan? _lastRenderingTime;
     private DateTime _nextWalk = DateTime.MaxValue;
     private bool _wasStrolling;
@@ -158,7 +147,7 @@ public partial class PetWindow : Window
         {
             var item = new MenuItem
             {
-                Header = $"{speed:0.0} DIP/次",
+                Header = $"{WalkSpeedOptions.PerSecond(speed):0} DIP/秒",
                 Tag = speed,
                 IsCheckable = true
             };
@@ -192,37 +181,15 @@ public partial class PetWindow : Window
     private void OnTick(object? sender, EventArgs e)
     {
         var now = DateTime.UtcNow;
-        var elapsed = now - _lastTick;
-        _lastTick = now;
         var chatting = _chatWindow?.IsVisible == true || _bubbleWindow?.IsVisible == true || _chatRuntime.IsBusy;
-        if (!chatting) _controller.Advance(elapsed);
         if (_wasStrolling && !_controller.IsStrolling)
             _nextWalk = StrollSchedule.NextWalkTime(now, Random.Shared);
         _wasStrolling = _controller.IsStrolling;
 
-        if (!_dragging && !_controller.IsPaused && !chatting)
+        if (!_dragging && !_controller.IsPaused && !chatting && !Pet.IsExternalAnimationActive && !_exitAnimationStarted)
         {
             var area = CurrentMonitor().WorkingArea;
-
-            // The sprite sequences decide travel, not this loop. Leftward only the middle walk clip
-            // travels; the opening and closing clips are acted in place. Rightward only the
-            // walk module travels while the opening turn and final settle are acted in place.
-            if (_controller.IsMoving)
-            {
-                // Accumulate the fractional speed and only move by whole DIP, so the step is never
-                // rounded away by the window position snapping.
-                var walkSpeed = _controller.IsStrollingRight ? _rightWalkSpeed : _leftWalkSpeed;
-                _travelRemainder += walkSpeed;
-                var whole = Math.Floor(_travelRemainder);
-                if (whole >= 1)
-                {
-                    _travelRemainder -= whole;
-                    var headingLeft = !_controller.IsStrollingRight;
-                    var target = headingLeft ? Left - whole : Left + whole;
-                    Left = PetGeometry.Step(Left, target, whole, area, PetWidth).X;
-                }
-            }
-            else if (_controller.State == PetState.Idle && now >= _nextWalk)
+            if (_controller.State == PetState.Idle && now >= _nextWalk)
             {
                 var goLeft = PetGeometry.PickStrollDirection(
                     Left, area, PetWidth, Random.Shared.NextDouble(), MinStrollRoomPx);
@@ -241,11 +208,45 @@ public partial class PetWindow : Window
     private void OnRendering(object? sender, EventArgs e)
     {
         if (e is not RenderingEventArgs rendering) return;
+        // WPF can raise Rendering more than once for a single presentation time.
+        if (_lastRenderingTime == rendering.RenderingTime) return;
         var elapsed = _lastRenderingTime is { } previous
             ? rendering.RenderingTime - previous
             : TimeSpan.Zero;
         _lastRenderingTime = rendering.RenderingTime;
-        Pet.Advance(Math.Max(0, elapsed.TotalSeconds));
+        AdvanceFrame(TimeSpan.FromSeconds(Math.Max(0, elapsed.TotalSeconds)));
+    }
+
+    private void AdvanceFrame(TimeSpan elapsed)
+    {
+        if (_closing) return;
+        Pet.State = _controller.State;
+        // Adopt any completed decode before deciding whether the animation clock may run.
+        Pet.Advance(0);
+        var chatting = _chatWindow?.IsVisible == true || _bubbleWindow?.IsVisible == true || _chatRuntime.IsBusy;
+        var ready = !Pet.IsExternalAnimationActive && Pet.IsStateAnimationReady;
+        if (ready && !chatting && !_exitAnimationStarted)
+        {
+            if (_controller.IsMoving && !_dragging && !_controller.IsPaused)
+            {
+                var speed = _controller.IsStrollingRight ? _rightWalkSpeed : _leftWalkSpeed;
+                var distance = _walkMotion.Advance(
+                    WalkSpeedOptions.PerSecond(speed), elapsed.TotalSeconds, CurrentDipTransform().ScaleX);
+                if (distance > 0)
+                {
+                    var direction = _controller.IsStrollingRight ? 1 : -1;
+                    Left = PetGeometry.ClampX(Left + direction * distance, CurrentMonitor().WorkingArea, PetWidth);
+                }
+            }
+            else _walkMotion.Reset();
+
+            _controller.Advance(elapsed);
+        }
+        else _walkMotion.Reset();
+
+        Pet.State = _controller.State;
+        // The same elapsed interval drives both the video and its movement/state progression.
+        Pet.Advance(ready || Pet.IsExternalAnimationActive ? elapsed.TotalSeconds : 0);
     }
 
 
@@ -318,7 +319,7 @@ public partial class PetWindow : Window
     {
         if (_exitAnimationStarted) return;
         _controller.Restore(_controller.IsPaused, manualSleeping: false);
-        _travelRemainder = 0;
+        _walkMotion.Reset();
         _chatWindow?.Hide();
         if (_bubbleWindow is not null)
         {
@@ -364,7 +365,7 @@ public partial class PetWindow : Window
     {
         if (_exitAnimationStarted) return;
         _controller.Restore(_controller.IsPaused, manualSleeping: false);
-        _travelRemainder = 0;
+        _walkMotion.Reset();
         _bubbleWindow?.Hide();
         if (_chatWindow is not null)
         {
@@ -465,6 +466,7 @@ public partial class PetWindow : Window
         if (!_exitAnimationStarted)
         {
             e.Cancel = true;
+            if (_chatWindow?.TryCloseMemoryPanel() == false) return;
             _exitAnimationStarted = true;
             _chatWindow?.CloseForExit();
             _bubbleWindow?.CloseForExit();

@@ -26,6 +26,7 @@ public partial class BubbleChatWindow : Window
     private bool _closed;
     private bool _exitRequested;
     private bool _replyCompleted;
+    private string? _memoryStatus;
 
     public BubbleChatWindow(ChatRuntime runtime)
         : this(runtime, CreateDispatcherTimer) { }
@@ -45,7 +46,9 @@ public partial class BubbleChatWindow : Window
         Loaded += (_, _) => { InputBox.Focus(); RefreshEntries(); UpdateBusyState(); };
         Closing += OnClosing;
         Closed += OnClosed;
+        IsVisibleChanged += (_, _) => UpdateBusyState();
         RefreshEntries();
+        UpdateBusyState();
     }
 
     public event EventHandler? ExpandRequested;
@@ -102,6 +105,10 @@ public partial class BubbleChatWindow : Window
     {
         if (_closed) return;
         var busy = _runtime.IsBusy;
+        var emotion = _runtime.Emotion;
+        EmotionLabel.Text = emotion.Label;
+        EmotionLabel.ToolTip = $"{emotion.Label} · 强度 {emotion.Intensity}%";
+        EmotionDot.Fill = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(emotion.Color));
         SendButton.Content = busy ? "■" : "↑";
         SendButton.FontSize = busy ? 13 : 22;
         SendButton.ToolTip = busy ? "取消回复" : "发送";
@@ -109,7 +116,12 @@ public partial class BubbleChatWindow : Window
         NewChatButton.IsEnabled = ExpandButton.IsEnabled = !busy;
         InputBox.IsReadOnly = busy;
         if (busy) StopDismissTimer();
-        else if (_runtime.MemoryError is not null) SetStatus(_runtime.MemoryError);
+        else
+        {
+            var error = _runtime.MemoryError ?? _runtime.EmotionSaveError;
+            if (error is not null || StatusText.Text == _memoryStatus) SetStatus(error);
+            _memoryStatus = error;
+        }
     }
 
     private async void OnSend(object sender, RoutedEventArgs e) => await SendAsync();
@@ -148,7 +160,7 @@ public partial class BubbleChatWindow : Window
             await _runtime.SendAsync(text, CancellationToken.None);
             if (_closed) return;
             _replyCompleted = true;
-            SetStatus(_runtime.MemoryError);
+            SetStatus(_runtime.MemoryError ?? _runtime.EmotionSaveError);
             StartDismissTimer(afterReply: true);
         }
         catch (OperationCanceledException)
@@ -225,7 +237,7 @@ public partial class BubbleChatWindow : Window
 
     private void HandleDeactivated()
     {
-        if (_closed || _runtime.IsBusy) return;
+        if (_closed || !IsVisible || _runtime.IsBusy) return;
         if (_runtime.Settings.BubbleDismiss == BubbleDismissMode.ClickOutside ||
             _runtime.Settings.BubbleDismiss == BubbleDismissMode.ClickOutsideOrIdle)
         {

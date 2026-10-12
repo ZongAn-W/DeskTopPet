@@ -1,8 +1,8 @@
-using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Media;
 using DesktopPet.Core;
 
 namespace DesktopPet;
@@ -13,6 +13,8 @@ public partial class ChatWindow : Window
     private readonly bool _ownsRuntime;
     private bool _closed;
     private bool _exitRequested;
+    private string? _memoryStatus;
+    private MemoryWindow? _memoryWindow;
 
     public event EventHandler? ConversationActivity;
 
@@ -39,9 +41,17 @@ public partial class ChatWindow : Window
         Loaded += (_, _) => { InputBox.Focus(); UpdateBusyState(); };
         Closing += OnClosing;
         Closed += OnClosed;
+        IsVisibleChanged += (_, _) => UpdateBusyState();
+        UpdateBusyState();
     }
 
-    public void CloseForExit() { _exitRequested = true; Close(); }
+    public void CloseForExit() { _exitRequested = true; _memoryWindow?.CloseForExit(); Close(); }
+
+    public bool TryCloseMemoryPanel()
+    {
+        _memoryWindow?.Close();
+        return _memoryWindow is null;
+    }
 
     private void OnRuntimeStateChanged(object? sender, EventArgs e)
     {
@@ -53,11 +63,21 @@ public partial class ChatWindow : Window
     {
         if (_closed) return;
         var busy = _runtime.IsBusy;
+        var emotion = _runtime.Emotion;
+        EmotionLabel.Text = emotion.Label;
+        EmotionLabel.ToolTip = $"{emotion.Label} · 强度 {emotion.Intensity}%";
+        EmotionDot.Fill = new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(emotion.Color));
         SendButton.Content = busy ? "取消" : "发送";
         SettingsButton.IsEnabled = NewChatButton.IsEnabled = !busy;
         InputBox.IsReadOnly = busy;
         if (!busy) Dispatcher.BeginInvoke(() => ChatScroll.ScrollToEnd());
-        if (!busy && _runtime.MemoryError is not null) StatusText.Text = _runtime.MemoryError;
+        if (!busy)
+        {
+            var error = _runtime.MemoryError ?? _runtime.EmotionSaveError;
+            if (error is not null || StatusText.Text == _memoryStatus)
+                StatusText.Text = error ?? "Enter 发送，Shift+Enter 换行。";
+            _memoryStatus = error;
+        }
         ConversationActivity?.Invoke(this, EventArgs.Empty);
     }
 
@@ -90,7 +110,7 @@ public partial class ChatWindow : Window
         {
             await _runtime.SendAsync(text, CancellationToken.None);
             if (_closed) return;
-            StatusText.Text = _runtime.MemoryError ?? "Enter 发送，Shift+Enter 换行。";
+            StatusText.Text = _runtime.MemoryError ?? _runtime.EmotionSaveError ?? "Enter 发送，Shift+Enter 换行。";
         }
         catch (OperationCanceledException)
         {
@@ -114,15 +134,17 @@ public partial class ChatWindow : Window
 
     private void OnMemory(object sender, RoutedEventArgs e)
     {
-        try
+        if (_memoryWindow is not null)
         {
-            _runtime.EnsureMemoryDocumentExists();
-            Process.Start(new ProcessStartInfo(_runtime.MemoryPath) { UseShellExecute = true });
+            if (_memoryWindow.WindowState == WindowState.Minimized) _memoryWindow.WindowState = WindowState.Normal;
+            _memoryWindow.Show();
+            _memoryWindow.Activate();
+            return;
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        {
-            StatusText.Text = "无法打开记忆文档，请检查文件权限和 Markdown 文件的默认打开程序。";
-        }
+        var window = new MemoryWindow(_runtime) { Owner = this };
+        _memoryWindow = window;
+        window.Closed += (_, _) => _memoryWindow = null;
+        window.Show();
     }
 
     private void OpenSettings()
