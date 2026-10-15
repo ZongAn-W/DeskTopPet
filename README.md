@@ -382,7 +382,8 @@ AI 设置中的性格仍是回复基础，情绪调整她的语气、措辞和�
 空闲恢复在打开聊天或发送消息时重新计算。新对话只清除短期聊天，不重置情绪。
 情绪在回复成功后保存到 `%LocalAppData%\DesktopPet\emotion.json`，重启后延续并计算离开期间的恢复。
 请求失败、取消或被新对话作废的回复不会改变情绪；情绪文件损坏时恢复平静，不影响聊天和长期记忆。
-模型使用 JSON 响应模式，界面只显示自然语言回复，不展示情绪元数据；兼容端点返回纯文字时沿用当前情绪。
+模型使用 JSON 响应模式，界面只显示回复正文，不展示情绪元数据。正文完整但情绪字段异常时仍显示正文并沿用当前情绪；兼容纯文字、代码块，以及外层被 JSON 围栏包住的回复。
+只有正文缺失或结构化回复无法读取时才自动重试一次，第二次仍失败会显示提示并恢复草稿。聊天回复上限为3072 tokens，以容纳代码和解释；服务明确报告截断时仍提示内容不完整。
 情绪判断不增加一次独立的分类请求；对话结束时的记忆整理仍单独请求。
 
 ### 长期记忆
@@ -470,3 +471,5 @@ and launch-at-startup are intentionally not part of this version.
 ## License
 
 No license file is included yet. Until one is added, the code is all rights reserved by default.
+
+空回复会自动重试一次；情绪 JSON 模式仍为空时回退普通文本并保持当前情绪。每轮最多四次请求，可能增加等待和 API 费用。截断与内容过滤显示具体原因。失败诊断位于 %LOCALAPPDATA%\DesktopPet\emotion.json.chat-diagnostics.jsonl（不含正文或密钥，轮换保留上一份）。

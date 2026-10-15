@@ -233,7 +233,7 @@ public sealed class MemoryPanelTests
         using var runtime = files.CreateRuntime(async (request, token) =>
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-            Assert.Equal(1024, body.RootElement.GetProperty("max_tokens").GetInt32());
+            Assert.Equal(3072, body.RootElement.GetProperty("max_tokens").GetInt32());
             Assert.Contains(JsonSerializer.Serialize(files.Memory.LoadDocument()), body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
             return Ok("记得。");
         });

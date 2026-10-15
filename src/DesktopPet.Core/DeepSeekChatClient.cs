@@ -6,11 +6,13 @@ using System.Text.Json.Serialization;
 
 namespace DesktopPet.Core;
 
-public sealed class DeepSeekChatClient(HttpClient http)
+public sealed class DeepSeekChatClient(HttpClient http, Action<string>? diagnostic = null)
 {
+    private const int ReplyMaxTokens = 3072;
+
     public Task<string> ReplyAsync(ChatSettings settings, IReadOnlyList<ChatMessage> messages, CancellationToken cancellationToken,
         string? memory = null)
-        => CompleteAsync(settings, BuildContext(settings, messages, memory), 1024, cancellationToken);
+        => CompleteAsync(settings, BuildContext(settings, messages, memory), ReplyMaxTokens, cancellationToken);
 
     public async Task<EmotionalReply> ReplyWithEmotionAsync(ChatSettings settings, IReadOnlyList<ChatMessage> messages,
         EmotionState emotion, DateTimeOffset now, CancellationToken cancellationToken, string? memory = null)
@@ -33,6 +35,8 @@ public sealed class DeepSeekChatClient(HttpClient http)
             Always respond with a single JSON object containing exactly: reply (nonempty natural-language string),
             emotion (one of Calm, Happy, Sad, Angry, Shy, Concerned), intensity (integer). No code fences or extra commentary.
             If the user requests code or JSON, put that answer inside the reply string. All metadata stays outside reply.
+            Escape newlines, quotation marks and backslashes inside reply as required by JSON.
+            Example: {"reply":"Here is the code:\n```c\nint value = 1;\n```","emotion":"Calm","intensity":0}
             """;
         var data = JsonSerializer.Serialize(new
         {
@@ -40,28 +44,93 @@ public sealed class DeepSeekChatClient(HttpClient http)
             reply_styles = Enum.GetValues<EmotionKind>().ToDictionary(kind => kind.ToString(), EmotionState.ReplyStyle)
         });
         var context = BuildContext(settings, messages, memory, instructions + "\n" + data);
-        var content = await CompleteAsync(settings, context, 1024, cancellationToken, jsonResponse: true).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string content;
+            try
+            {
+                content = await CompleteAsync(settings, context, ReplyMaxTokens, cancellationToken, jsonResponse: true).ConfigureAwait(false);
+            }
+            catch (ChatServiceException error) when (error.EmptyReply)
+            {
+                // Remove emotion formatting instructions when falling back to natural language.
+                var plainContext = BuildContext(settings, messages, memory);
+                plainContext.Insert(1, new("system", "Answer the user's request directly in natural language. Do not produce an emotion metadata envelope."));
+                return new(await CompleteAsync(settings, plainContext, ReplyMaxTokens, cancellationToken).ConfigureAwait(false), current);
+            }
+            try
+            {
+                return ReadEmotionalReply(content, current, now);
+            }
+            catch (JsonException) when (attempt == 0)
+            {
+                // Retry only unreadable replies, without putting a broken response into the conversation.
+                context.Add(new("system", "The previous response could not be read. Answer the user's latest request again " +
+                    "with one valid JSON object containing reply, emotion and intensity. Put the complete answer, including any code, " +
+                    "inside the nonempty reply string. Escape newlines, quotation marks and backslashes. Do not wrap the object in Markdown."));
+            }
+            catch (JsonException)
+            {
+                throw new ChatServiceException("她的回复格式不完整，请重试。");
+            }
+        }
+    }
 
-        // Older compatible endpoints may still return plain text; retain the existing mood in that case.
-        if (!content.StartsWith('{') && !content.StartsWith('[') && !content.StartsWith("```", StringComparison.Ordinal))
-            return new(content, current);
-        try
+    private static EmotionalReply ReadEmotionalReply(string content, EmotionState current, DateTimeOffset now)
+    {
+        var payload = content;
+        var hasTrailingMarkdown = false;
+        if (content.StartsWith("```", StringComparison.Ordinal))
         {
-            using var json = JsonDocument.Parse(content);
-            var body = json.RootElement;
-            if (body.ValueKind != JsonValueKind.Object ||
-                !body.TryGetProperty("reply", out var reply) || reply.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(reply.GetString()) ||
-                !body.TryGetProperty("emotion", out var kind) || kind.ValueKind != JsonValueKind.String ||
-                !Enum.TryParse<EmotionKind>(kind.GetString(), ignoreCase: true, out var next) || !Enum.IsDefined(next) ||
-                !body.TryGetProperty("intensity", out var strength) || strength.ValueKind != JsonValueKind.Number || !strength.TryGetInt32(out var intensity) ||
-                (next == EmotionKind.Calm ? intensity != 0 : intensity is < 15 or > 100))
+            var firstLineEnd = content.IndexOf('\n');
+            if (firstLineEnd < 0) return new(content, current);
+            var openingFence = content[..firstLineEnd].Trim();
+            if (openingFence != "```" && !openingFence.Equals("```json", StringComparison.OrdinalIgnoreCase))
+                return new(content, current);
+
+            var closingFenceStart = -1;
+            for (var lineStart = firstLineEnd + 1; lineStart < content.Length;)
+            {
+                var lineEnd = content.IndexOf('\n', lineStart);
+                if (lineEnd < 0) lineEnd = content.Length;
+                if (content[lineStart..lineEnd].Trim() == "```")
+                {
+                    closingFenceStart = lineStart;
+                    hasTrailingMarkdown = !string.IsNullOrWhiteSpace(content[lineEnd..]);
+                    break;
+                }
+                lineStart = lineEnd + 1;
+            }
+            payload = (closingFenceStart >= 0 ? content[(firstLineEnd + 1)..closingFenceStart] : content[(firstLineEnd + 1)..]).Trim();
+            if (openingFence == "```" && !payload.StartsWith('{') && !payload.StartsWith('['))
+                return new(content, current);
+            if (closingFenceStart < 0)
                 throw new JsonException();
-            return new(reply.GetString()!.Trim(), current.Transition(next, intensity, now));
         }
-        catch (JsonException)
+        else if (!content.StartsWith('{') && !content.StartsWith('['))
+            return new(content, current);
+
+        using var json = JsonDocument.Parse(payload);
+        var body = json.RootElement;
+        // A code/JSON answer can itself be an object or array, without being the emotion envelope.
+        if (body.ValueKind != JsonValueKind.Object ||
+            (!body.TryGetProperty("reply", out _) && !body.TryGetProperty("emotion", out _) && !body.TryGetProperty("intensity", out _)))
+            return new(content, current);
+        if (hasTrailingMarkdown) throw new JsonException();
+        if (!body.TryGetProperty("reply", out var reply) || reply.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(reply.GetString()))
+            throw new JsonException();
+
+        var text = reply.GetString()!.Trim();
+        if (!body.TryGetProperty("emotion", out var kind) || kind.ValueKind != JsonValueKind.String ||
+            !Enum.TryParse<EmotionKind>(kind.GetString(), ignoreCase: true, out var next) || !Enum.IsDefined(next) ||
+            !body.TryGetProperty("intensity", out var strength) || strength.ValueKind != JsonValueKind.Number || !strength.TryGetInt32(out var intensity) ||
+            (next == EmotionKind.Calm ? intensity != 0 : intensity is < 15 or > 100))
         {
-            throw new ChatServiceException("她的回复格式不完整，请重试。");
+            // Emotion is optional for a usable answer; keep the previous mood if only its metadata is bad.
+            return new(text, current);
         }
+        return new(text, current.Transition(next, intensity, now));
     }
 
     private static List<ChatMessage> BuildContext(ChatSettings settings, IReadOnlyList<ChatMessage> messages,
@@ -88,9 +157,15 @@ public sealed class DeepSeekChatClient(HttpClient http)
             Record only user-confirmed identity, preferences, important events, ongoing plans, and agreements useful in future conversations.
             Do not invent facts or treat the assistant's guesses, roleplay or suggestions as user facts.
             Omit small talk, transient questions, passwords, API keys and other credentials. Respect explicit requests not to remember a fact.
-            Remove facts the user explicitly asks to forget. If nothing is worth remembering, return existing_memory unchanged.
+            Remove facts the user explicitly asks to forget. If nothing new is worth remembering, preserve existing facts,
+            but still organize any existing unclassified notes using the heading format below.
             Date time-sensitive events using ended_at as context, preserve uncertainty, and distinguish plans from completed events.
             Use short bullet points grouped by topic; keep the complete document below 10000 characters.
+            Every note MUST be under a Markdown level-two heading written exactly as '## Topic name'.
+            Use descriptive topic names in the user's language, for example '## 身份与背景', '## 偏好',
+            '## 计划与约定', or '## 重要事件'. Choose only relevant topics; omit empty headings.
+            Do not put bullets directly below the document title, use bold text as a topic heading, or leave old notes unclassified.
+            Classification changes only organization: preserve facts, dates, uncertainty and meaning without adding claims.
             """;
         var data = JsonSerializer.Serialize(new { existing_memory = memory, conversation, ended_at = endedAt });
         return CompleteAsync(settings, [new("system", instructions), new("user", data)], 4096, cancellationToken);
@@ -98,6 +173,20 @@ public sealed class DeepSeekChatClient(HttpClient http)
 
     private async Task<string> CompleteAsync(ChatSettings settings, IReadOnlyList<ChatMessage> messages,
         int maxTokens, CancellationToken cancellationToken, bool jsonResponse = false)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await CompleteOnceAsync(settings, messages, maxTokens, cancellationToken, jsonResponse).ConfigureAwait(false);
+            }
+            catch (ChatServiceException error) when (error.EmptyReply && attempt == 0) { }
+        }
+    }
+
+    private async Task<string> CompleteOnceAsync(ChatSettings settings, IReadOnlyList<ChatMessage> messages,
+        int maxTokens, CancellationToken cancellationToken, bool jsonResponse)
     {
         if (string.IsNullOrWhiteSpace(settings.ApiKey))
             throw new ChatServiceException("请先在 AI 设置中填写 DeepSeek API 密钥。");
@@ -132,14 +221,29 @@ public sealed class DeepSeekChatClient(HttpClient http)
                     _ => $"DeepSeek 请求失败（HTTP {(int)response.StatusCode}），请稍后重试。"
                 });
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
-            if (!json.RootElement.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array ||
-                choices.GetArrayLength() == 0 || !choices[0].TryGetProperty("message", out var message) ||
+            var root = json.RootElement;
+            var first = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("choices", out var list) &&
+                list.ValueKind == JsonValueKind.Array && list.GetArrayLength() > 0 ? list[0] : default;
+            var finish = first.ValueKind == JsonValueKind.Object && first.TryGetProperty("finish_reason", out var reason) &&
+                reason.ValueKind == JsonValueKind.String ? reason.GetString() : null;
+            if (finish == "length")
+            {
+                RecordDiagnostic("truncated", jsonResponse, root, first, finish);
+                throw new ChatServiceException("DeepSeek 返回的内容不完整（达到输出上限，已截断）。请缩短问题或分步提问。");
+            }
+            if (finish == "content_filter")
+            {
+                RecordDiagnostic("filtered", jsonResponse, root, first, finish);
+                throw new ChatServiceException("DeepSeek 未提供正文（内容过滤），请调整提问后重试。");
+            }
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array ||
+                choices.GetArrayLength() == 0 || choices[0].ValueKind != JsonValueKind.Object || !choices[0].TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object ||
                 !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.String ||
                 string.IsNullOrWhiteSpace(content.GetString()))
-                throw new ChatServiceException("DeepSeek 没有返回可用的回答，请重试。");
-            if (choices[0].TryGetProperty("finish_reason", out var finishReason) &&
-                finishReason.ValueKind == JsonValueKind.String && finishReason.GetString() == "length")
-                throw new ChatServiceException("DeepSeek 返回的内容不完整，请重试。");
+            {
+                RecordDiagnostic("empty", jsonResponse, root, first, finish);
+                throw new ChatServiceException("DeepSeek 返回空回复，自动重试后仍未获得正文，请稍后再试。", emptyReply: true);
+            }
             return content.GetString()!.Trim();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -154,5 +258,17 @@ public sealed class DeepSeekChatClient(HttpClient http)
         {
             throw new ChatServiceException("DeepSeek 返回的数据无法读取，请重试。");
         }
+    }
+
+    private void RecordDiagnostic(string failure, bool jsonMode, JsonElement root, JsonElement choice, string? finish)
+    {
+        // Only structural flags and a bounded protocol identifier; never response text or credentials.
+        var id = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("id", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
+        id = id is not null && id.Length <= 128 && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_') ? id : null;
+        var hasMessage = choice.ValueKind == JsonValueKind.Object && choice.TryGetProperty("message", out _);
+        try { diagnostic?.Invoke(JsonSerializer.Serialize(new { timestamp = DateTimeOffset.UtcNow, failure, jsonMode, id, hasMessage,
+            finishReason = finish is "length" or "content_filter" or "stop" or "tool_calls" or "insufficient_system_resource" ? finish : "unknown" })); }
+        catch { /* Diagnostics must never prevent a reply or recovery. */ }
     }
 }

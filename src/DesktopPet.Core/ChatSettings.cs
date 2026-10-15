@@ -21,4 +21,7 @@ public sealed record ChatSettings
 }
 
 public sealed record ChatMessage(string Role, string Content);
-public sealed class ChatServiceException(string message) : Exception(message);
+public sealed class ChatServiceException(string message, bool emptyReply = false) : Exception(message)
+{
+    public bool EmptyReply { get; } = emptyReply;
+}

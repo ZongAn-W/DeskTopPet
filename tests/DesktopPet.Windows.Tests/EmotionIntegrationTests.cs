@@ -77,6 +77,45 @@ public sealed class EmotionIntegrationTests
         Assert.Single(runtime.Entries);
     }
 
+    [Fact]
+    public async Task UsableCodeAnswerWithBadMetadataIsDisplayedAndRecordedWithoutChangingMood()
+    {
+        const string answer = "第一列可以逐行取出：\n```c\nfirstCol[i] = matrix[i][0];\n```";
+        await RunOnSta(async () =>
+        {
+            using var files = new TestFiles();
+            files.Emotions.Save(new EmotionState { Kind = EmotionKind.Concerned, Intensity = 35 });
+            using var runtime = files.CreateRuntime(async (request, token) =>
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                if (body.RootElement.GetProperty("max_tokens").GetInt32() == 4096)
+                {
+                    using var summary = JsonDocument.Parse(body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!);
+                    var conversation = summary.RootElement.GetProperty("conversation");
+                    Assert.Equal(answer, conversation[1].GetProperty("Content").GetString());
+                    return Ok("# Desktop Pet Memory\n");
+                }
+                return Ok(JsonSerializer.Serialize(new { reply = answer, emotion = "Unknown", intensity = 30 }));
+            });
+            var full = new ChatWindow(runtime);
+            var bubble = new BubbleChatWindow(runtime);
+            try
+            {
+                await runtime.SendAsync("下一步怎么把二维矩阵的第一列拿出来？", default);
+                Assert.Equal(3, runtime.Entries.Count);
+                Assert.Equal(answer, runtime.Entries[^1].Text);
+                Assert.Equal(answer, runtime.Session.Messages[^1].Content);
+                Assert.Equal(EmotionKind.Concerned, runtime.Emotion.Kind);
+                Assert.Equal("担心", ((TextBlock)full.FindName("EmotionLabel")).Text);
+                Assert.Equal("担心", ((TextBlock)bubble.FindName("EmotionLabel")).Text);
+                Assert.Equal(EmotionKind.Concerned, files.Emotions.Load(DateTimeOffset.UtcNow).Kind);
+                await runtime.EndConversationAsync();
+                Assert.Null(runtime.MemoryError);
+            }
+            finally { full.CloseForExit(); bubble.CloseForExit(); }
+        });
+    }
+
     private static bool IsSummary(HttpRequestMessage request)
     {
         using var body = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());

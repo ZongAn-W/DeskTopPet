@@ -36,7 +36,17 @@ public sealed class ChatRuntime : IDisposable
             SettingsLoadError = error.Message;
         }
 
-        var client = new DeepSeekChatClient(_http);
+        var client = new DeepSeekChatClient(_http, entry =>
+        {
+            var logPath = settingsStore.EmotionPath + ".chat-diagnostics.jsonl";
+            lock (_gate)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+                if (File.Exists(logPath) && new FileInfo(logPath).Length > 256 * 1024)
+                    File.Move(logPath, logPath + ".previous", overwrite: true);
+                File.AppendAllText(logPath, entry + Environment.NewLine);
+            }
+        });
         _emotionStore = emotionStore ?? new EmotionStore(settingsStore.EmotionPath);
         Session = new ChatSession(client, _emotionStore.Load(DateTimeOffset.UtcNow));
         if (_emotionStore.LoadFailed) EmotionSaveError = "无法读取保存的情绪，已恢复为平静。";

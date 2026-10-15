@@ -67,15 +67,46 @@ public sealed class EmotionTests
     [InlineData("{\"reply\":\"answer\",\"emotion\":\"Happy\",\"intensity\":-1}")]
     [InlineData("{\"reply\":\"answer\",\"emotion\":\"Happy\",\"intensity\":101}")]
     [InlineData("{\"reply\":\"answer\",\"emotion\":\"Calm\",\"intensity\":30}")]
+    [InlineData("{\"reply\":\"answer\"}")]
+    [InlineData("{\"reply\":\"answer\",\"emotion\":null,\"intensity\":30}")]
+    [InlineData("{\"reply\":\"answer\",\"emotion\":\"Happy\",\"intensity\":30.5}")]
+    [InlineData("{\"reply\":\"answer\",\"emotion\":\"Happy\"}")]
+    public async Task InvalidMetadataStillCommitsTheReplyAndRetainsEmotion(string response)
+    {
+        var requests = 0;
+        using var http = new HttpClient(new Handler((_, _) =>
+        {
+            requests++;
+            return Task.FromResult(Ok(response));
+        }));
+        var initial = new EmotionState { Kind = EmotionKind.Sad, Intensity = 40, UpdatedAt = Now };
+        var session = new ChatSession(new DeepSeekChatClient(http), initial, new FixedClock(Now));
+        Assert.Equal("answer", await session.SendAsync("message", Settings, default));
+        Assert.Equal(1, requests);
+        Assert.Equal(2, session.Messages.Count);
+        Assert.Equal("answer", session.Messages[^1].Content);
+        Assert.Equal(initial, session.Emotion);
+    }
+
+    [Theory]
     [InlineData("{\"reply\":\"\",\"emotion\":\"Happy\",\"intensity\":30}")]
+    [InlineData("{\"reply\":\" \",\"emotion\":\"Happy\",\"intensity\":30}")]
+    [InlineData("{\"reply\":null,\"emotion\":\"Happy\",\"intensity\":30}")]
+    [InlineData("{\"reply\":42,\"emotion\":\"Happy\",\"intensity\":30}")]
     [InlineData("{\"emotion\":\"Happy\",\"intensity\":30}")]
     [InlineData("{broken")]
-    public async Task InvalidMetadataDoesNotCommitChatOrEmotion(string response)
+    public async Task UnreadableReplyDoesNotCommitChatOrEmotionAfterOneRetry(string response)
     {
-        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Ok(response))));
+        var requests = 0;
+        using var http = new HttpClient(new Handler((_, _) =>
+        {
+            requests++;
+            return Task.FromResult(Ok(response));
+        }));
         var initial = new EmotionState { Kind = EmotionKind.Sad, Intensity = 40, UpdatedAt = Now };
         var session = new ChatSession(new DeepSeekChatClient(http), initial, new FixedClock(Now));
         await Assert.ThrowsAsync<ChatServiceException>(() => session.SendAsync("message", Settings, default));
+        Assert.Equal(2, requests);
         Assert.Empty(session.Messages);
         Assert.Equal(initial, session.Emotion);
     }
