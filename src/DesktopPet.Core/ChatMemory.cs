@@ -4,6 +4,7 @@ public sealed class ChatMemory
 {
     private readonly DeepSeekChatClient _client;
     private readonly ChatMemoryStore _store;
+    private readonly MemoryBackup? _backups;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _summaryGate = new(1, 1);
     private readonly List<ChatMessage> _conversation = [];
@@ -13,15 +14,19 @@ public sealed class ChatMemory
     private long _generation;
     private long _forgetGeneration;
 
-    public ChatMemory(DeepSeekChatClient client, ChatMemoryStore store)
+    public ChatMemory(DeepSeekChatClient client, ChatMemoryStore store, MemoryBackup? backups = null)
     {
         _client = client;
         _store = store;
+        _backups = backups;
         _forgetGeneration = store.ForgetGeneration;
     }
 
     public string DocumentPath => _store.DocumentPath;
     public Exception? LastError { get; private set; }
+
+    /// <summary>Which notes the most recent reply received, for the memory panel.</summary>
+    public MemoryDigestReport? LastRecall { get; private set; }
 
     public void SetRecordingEnabled(bool enabled)
     {
@@ -46,6 +51,7 @@ public sealed class ChatMemory
         {
             try
             {
+                _backups?.Capture(CurrentDocument());
                 _store.SaveEditedDocument(document, expectedDocument);
                 LastError = null;
             }
@@ -82,6 +88,32 @@ public sealed class ChatMemory
     }
 
     public void EnsureDocumentExists() => _store.EnsureDocumentExists();
+
+    /// <summary>
+    /// Builds the bounded memory context for one reply: lasting facts, then the notes that match
+    /// this message, are recent, or still fit the remaining character budget.
+    /// </summary>
+    public (string Text, MemoryDigestReport? Report) ReadContextFor(string query, DateTimeOffset now)
+    {
+        var document = ReadDocument();
+        if (document.Length == 0)
+        {
+            LastRecall = new MemoryDigestReport(now, "", 0, 0, 0, [], []);
+            return ("", LastRecall);
+        }
+
+        try
+        {
+            var digest = MemoryDigest.Build(document, query, now);
+            LastRecall = digest.Report;
+            return (digest.Text, digest.Report);
+        }
+        catch (Exception error) when (IsMemoryError(error))
+        {
+            LastError = error;
+            return ("", null);
+        }
+    }
 
     public async Task EndConversationAsync(ChatSettings settings, CancellationToken cancellationToken)
     {
@@ -138,6 +170,7 @@ public sealed class ChatMemory
                     {
                         SynchronizeForgetGeneration();
                         if (!_recordingEnabled || _generation != generation) return;
+                        _backups?.Capture(previous.Document);
                         _store.SaveSummary(updated, previous);
                         var remaining = _pending.Skip(1).ToList();
                         if (chunk.Length < batch.Messages.Length)
@@ -166,6 +199,12 @@ public sealed class ChatMemory
         if (_loaded) return;
         _pending.AddRange(_store.LoadPending());
         _loaded = true;
+    }
+
+    private string? CurrentDocument()
+    {
+        try { return _store.LoadDocument(); }
+        catch (Exception error) when (IsMemoryError(error)) { return null; }
     }
 
     private void SynchronizeForgetGeneration()

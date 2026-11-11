@@ -43,6 +43,25 @@ public sealed class MemoryWindowTests
     });
 
     [Fact]
+    public Task MemoryPanelShowsWhichNotesTheLastReplyReceived() => RunOnSta(async () =>
+    {
+        using var files = new TestFiles(InitialDocument);
+        using var runtime = files.CreateRuntime((_, _) => Task.FromResult(Ok("记得。")));
+        await runtime.SendAsync("你记得什么？", default);
+
+        var window = new MemoryWindow(runtime);
+        try
+        {
+            var info = Control<TextBlock>(window, "RecallInfo");
+            Assert.Contains("上次回复带上了全部 3 条记忆", info.Text);
+            Assert.NotNull(info.ToolTip);
+            var recallPath = Path.Combine(Path.GetDirectoryName(files.Memory.DocumentPath)!, "memory-recall.json");
+            Assert.True(File.Exists(recallPath));
+        }
+        finally { window.CloseForExit(); }
+    });
+
+    [Fact]
     public Task SearchFiltersContentAndSectionAndClearsAnUnmatchedSelection() => RunOnSta(() =>
     {
         using var files = new TestFiles(InitialDocument);
@@ -187,7 +206,9 @@ public sealed class MemoryWindowTests
             if (IsSummary(body)) summaries++;
             Assert.False(IsSummary(body));
             var messages = body.RootElement.GetProperty("messages");
-            Assert.Contains(JsonSerializer.Serialize(InitialDocument), messages[1].GetProperty("content").GetString());
+            var memory = messages[1].GetProperty("content").GetString()!;
+            Assert.Contains("喜欢 Tea", memory);
+            Assert.Contains("明天做演示", memory);
             return Ok("仍然记得你喜欢茶。");
         }))
         {

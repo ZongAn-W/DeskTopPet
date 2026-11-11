@@ -46,7 +46,7 @@ public sealed class ChatMemoryIntegrationTests
             Assert.False(IsSummary(body));
             var messages = body.RootElement.GetProperty("messages");
             Assert.Equal(4, messages.GetArrayLength());
-            Assert.Contains(JsonSerializer.Serialize(MemoryDocument), messages[1].GetProperty("content").GetString());
+            Assert.Contains("The user likes tea.", messages[1].GetProperty("content").GetString());
             Assert.Equal("What do I like?", messages[3].GetProperty("content").GetString());
             return Ok("Tea");
         });

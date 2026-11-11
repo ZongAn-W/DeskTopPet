@@ -65,6 +65,7 @@
             <StackPanel>
                 <CheckBox x:Name="RecordingCheckBox" Content="自动记录新记忆" Checked="OnRecordingChanged" Unchecked="OnRecordingChanged"/>
                 <TextBlock x:Name="RecordingHelp" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="20,6,0,0"/>
+                <TextBlock x:Name="RecallInfo" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" FontSize="12" Margin="20,6,0,0"/>
             </StackPanel>
         </Border>
         <Grid Grid.Row="2">

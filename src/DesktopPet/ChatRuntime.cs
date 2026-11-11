@@ -14,6 +14,7 @@ public sealed class ChatRuntime : IDisposable
     private readonly object _gate = new();
     private readonly HttpClient _http;
     private readonly ChatMemory _memory;
+    private readonly MemoryRecallStore _recallStore;
     private readonly EmotionStore _emotionStore;
     private readonly CancellationTokenSource _memoryStop = new();
     private Task _memoryWork = Task.CompletedTask;
@@ -50,8 +51,12 @@ public sealed class ChatRuntime : IDisposable
         _emotionStore = emotionStore ?? new EmotionStore(settingsStore.EmotionPath);
         Session = new ChatSession(client, _emotionStore.Load(DateTimeOffset.UtcNow));
         if (_emotionStore.LoadFailed) EmotionSaveError = "无法读取保存的情绪，已恢复为平静。";
-        _memory = new ChatMemory(client, memoryStore ?? new ChatMemoryStore(settingsStore.MemoryPath));
+        var memoryDirectory = Path.GetDirectoryName(settingsStore.MemoryPath)!;
+        _recallStore = new MemoryRecallStore(Path.Combine(memoryDirectory, "memory-recall.json"));
+        var backups = new MemoryBackup(Path.Combine(memoryDirectory, "memory-backups"));
+        _memory = new ChatMemory(client, memoryStore ?? new ChatMemoryStore(settingsStore.MemoryPath), backups);
         _memory.SetRecordingEnabled(_settings.MemoryRecordingEnabled);
+        LastMemoryRecall = _recallStore.Load();
         Entries = [];
         AddGreeting();
         _memoryWork = RetryMemoryAsync();
@@ -65,6 +70,9 @@ public sealed class ChatRuntime : IDisposable
     public string? SettingsLoadError { get; }
     public string MemoryPath => _memory.DocumentPath;
     public bool MemoryRecordingEnabled => Settings.MemoryRecordingEnabled;
+
+    /// <summary>Which notes the last reply received, and why the other notes stayed out.</summary>
+    public MemoryDigestReport? LastMemoryRecall { get; private set; }
 
     public string LoadMemoryDocument() => _memory.LoadDocumentForEditing();
 
@@ -97,7 +105,7 @@ public sealed class ChatRuntime : IDisposable
     {
         ThrowIfDisposed();
         if (string.IsNullOrWhiteSpace(text))
-            throw new ChatServiceException("璇疯緭鍏ユ兂璇寸殑璇濄€?");
+            throw new ChatServiceException("请先输入想说的话。");
 
         var trimmed = text.Trim();
         RequestState request;
@@ -116,7 +124,13 @@ public sealed class ChatRuntime : IDisposable
         try
         {
             await _memoryWork.WaitAsync(request.Source.Token).ConfigureAwait(true);
-            var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token, _memory.ReadDocument()).ConfigureAwait(true);
+            var (memoryText, recall) = _memory.ReadContextFor(trimmed, DateTimeOffset.Now);
+            if (recall is not null)
+            {
+                LastMemoryRecall = recall;
+                _recallStore.Save(recall);
+            }
+            var reply = await Session.SendAsync(trimmed, Settings, request.Source.Token, memoryText).ConfigureAwait(true);
             lock (_gate)
             {
                 if (ReferenceEquals(_request, request) && !request.Invalidated && !_disposed)

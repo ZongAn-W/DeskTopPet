@@ -25,8 +25,8 @@ bundled or read at runtime**. Only the cut-out, background-free PNG frames ship 
 | Text chat | Double-click uses the AI setting for either a lightweight bubble or the full chat window. Both views use the same in-memory DeepSeek session; no speech or microphone is used |
 | Bubble chat | Shows the latest 3, 4, or 5 messages (5 by default). Dismissal can be click-outside, click-outside or 15 seconds idle, or about 20 seconds after a reply |
 | Chat context | Keeps the last 20 successful turns for the current app session. Switching views and reopening either view keeps the same context; a new chat or quitting clears this short-term context |
-| Long-term memory | Closing/dismissing chat, starting a new chat, or exiting summarizes useful facts into a local Markdown document. New chats and app restarts read these notes. Pending summaries survive network failures and restart |
-| Memory management | View and search notes by topic, edit/reclassify individual notes, add or delete notes, and pause automatic recording. Manual saves discard earlier unsummarized conversations so old summaries cannot restore deleted notes |
+| Long-term memory | Closing/dismissing chat, starting a new chat, or exiting summarizes useful facts into a local Markdown document. Each reply receives the lasting facts plus the notes that match the current message or are recent, within a character budget. Pending summaries survive network failures and restart |
+| Memory management | View and search notes by topic, edit/reclassify individual notes, add or delete notes, and pause automatic recording. The panel explains which notes the last reply received and why the others stayed out. Every rewrite is backed up under `memory-backups`. Manual saves discard earlier unsummarized conversations so old summaries cannot restore deleted notes |
 | Emotions | Conversation changes her mood and reply style: calm, happy, sad, angry, shy or concerned. Both chat views show the shared mood; its strength develops gradually, recovers during idle time, and survives a new chat or restart |
 | Right-click menu | Separate lightweight bubble chat and full chat window commands, plus pause/resume walking, sleep/wake, independent left/right speed settings, and exit |
 | Notification area | Tray icon with separate lightweight bubble chat and full chat window commands plus exit |
@@ -359,7 +359,7 @@ build output.
 密钥和 AI 设置通过当前 Windows 用户的 DPAPI 加密保存在
 `%LocalAppData%\DesktopPet\ai-settings.bin`，不写入源码或发布文件。
 请求使用 [DeepSeek 官方 Chat Completions 接口](https://api-docs.deepseek.com/api/create-chat-completion/)，
-发送消息时将人物设定、记忆摘要、当前情绪、最近的对话和当前消息提交给 DeepSeek；对话结束时另外请求整理记忆。
+发送消息时将人物设定、记忆（常驻事实与和这句话相关的事件）、当前情绪、最近的对话和当前消息提交给 DeepSeek；对话结束时另外请求整理记忆。
 密钥错误、余额不足、请求频繁、网络失败或超时会显示提示，并保留草稿以便重试。
 
 ### 人物情绪
@@ -394,8 +394,17 @@ AI 设置中的性格仍是回复基础，情绪调整她的语气、措辞和�
 
 文档记录用户明确表达的偏好、重要事情、计划和约定，合并重复信息并更新被纠正的事实。
 下一次聊天会自动读取这份摘要，开始新对话或重启程序仍保留长期记忆。
+每条记忆只装一件事；带日期的事情以 `YYYY-MM-DD：` 开头，整理时不会编造或把不确定的日期变成确定日期。
+
+每次发送时，记忆不会整份照搬：`关于她`、`偏好`、`约定`、`计划与约定` 等主题里的长期事实每轮都带上，
+其余“一起经历的事”按与这句话的相关度和新鲜度挑选，整段注入不超过1400字。
+条目带日期时会换算成“3天前”“去年 09-17”这类相对时间再交给她，避免把旧事说成刚发生。
+文档估算长度不超过预算时仍整份注入，常见的小文档行为不变。
+
 完整聊天窗口右上角的文档图标打开 **记忆管理** 面板。可以按原有主题查看和搜索，
 逐条修改内容或主题、添加和删除记忆；点击 **保存修改** 后写入文档，下次发送会读取。
+面板还会说明上次回复带上了哪几条记忆；把鼠标停在说明上，可以看到没带上的条目和原因
+（常驻事实太多、这次字数不够、和这句话无关等）。
 主题在单独的输入框设置，记忆内容使用普通文字；不支持在内容中粘贴 Markdown 标题或代码围栏。
 删除先留在草稿中，可以 **撤销修改**；关闭有未保存修改的面板时会提示保存或放弃。
 面板中的 **打开文档** 仍可用默认程序打开 Markdown，外部编辑后点击 **重新读取**。
@@ -410,6 +419,9 @@ AI 设置中的性格仍是回复基础，情绪调整她的语气、措辞和�
 
 `memory.md` 是可编辑的 UTF-8 明文文档。为防止整理失败丢失内容，待整理的成功对话暂存于
 同目录的 `memory.md.pending.json`，每段整理成功后移出待办文件；它不是永久聊天记录。
+每次整理或手动保存覆盖文档前，旧版本会先备份到同目录的 `memory-backups/`（保留最近10份），
+误整理时可以手动取回；上次回复带上了哪些记忆记录在同目录的 `memory-recall.json`。
+这两个辅助文件损坏或无法写入时只会丢失说明和备份，不影响聊天与记忆读取。
 整理请求失败时保留原有摘要及待处理内容，下次结束对话、保存 AI 设置或启动程序时重试。
 文件权限错误需要修复后重试；待办文件无法写入时，未整理内容只能在本次运行中保留。
 退出最多等待15秒完成整理，未完成部分留待下次启动；整理会产生额外的 DeepSeek API 请求。

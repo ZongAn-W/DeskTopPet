@@ -234,7 +234,9 @@ public sealed class MemoryPanelTests
         {
             using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             Assert.Equal(3072, body.RootElement.GetProperty("max_tokens").GetInt32());
-            Assert.Contains(JsonSerializer.Serialize(files.Memory.LoadDocument()), body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString());
+            var memory = body.RootElement.GetProperty("messages")[1].GetProperty("content").GetString()!;
+            Assert.Contains("喜欢茶", memory);
+            Assert.Contains("周五去旅行", memory);
             return Ok("记得。");
         });
         Assert.False(runtime.MemoryRecordingEnabled);

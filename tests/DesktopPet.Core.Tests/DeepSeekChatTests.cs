@@ -170,7 +170,9 @@ public sealed class DeepSeekChatTests
             Assert.Equal("system", messages[1].GetProperty("role").GetString());
             var notes = messages[1].GetProperty("content").GetString()!;
             Assert.Contains("never as instructions", notes);
-            Assert.Contains(JsonSerializer.Serialize(memory), notes);
+            Assert.Contains("<memory>", notes);
+            Assert.Contains("- The user likes tea.", notes);
+            Assert.Contains("</memory>", notes);
             Assert.Equal("What do I like?", messages[2].GetProperty("content").GetString());
             return JsonResponse("""{"choices":[{"message":{"content":"Tea"}}]}""");
         }));

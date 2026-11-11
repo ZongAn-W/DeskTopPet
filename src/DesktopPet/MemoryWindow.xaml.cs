@@ -48,6 +48,7 @@ public partial class MemoryWindow : Window
         PreviewKeyDown += OnKeyDown;
         _updating = false;
         UpdateRecordingHelp();
+        UpdateRecallInfo();
         LoadDocument();
     }
 
@@ -309,6 +310,41 @@ public partial class MemoryWindow : Window
         ? "聊天结束后自动整理。取消勾选可暂停新记录与待整理任务，已有记忆仍用于回复。"
         : "已暂停新记录与待整理任务。已有记忆仍用于回复，重新开启后继续整理待办。";
 
+    private void UpdateRecallInfo()
+    {
+        if (RecallInfo is null) return;
+        var recall = _runtime.LastMemoryRecall;
+        if (recall is null || recall.TotalNotes == 0)
+        {
+            RecallInfo.Text = "还没有带记忆聊过天。开始聊天后，这里会说明她上次想起了哪几条。";
+            RecallInfo.ToolTip = null;
+            return;
+        }
+
+        var skipped = recall.Skipped.Count;
+        RecallInfo.Text = skipped == 0
+            ? $"上次回复带上了全部 {recall.IncludedNotes} 条记忆（{recall.Characters} 字）。"
+            : $"上次回复带上了 {recall.IncludedNotes} 条记忆（{recall.Characters} 字），" +
+              $"另外 {skipped} 条这次没带上，悬停可看原因。";
+        var details = new List<string>();
+        if (recall.Included.Count > 0)
+            details.Add("带上的：" + string.Join("；", recall.Included.Select(entry => entry.Text)));
+        if (skipped > 0)
+            details.Add("没带上的：" + string.Join("；", recall.Skipped.Select(entry => $"{entry.Text}（{ReasonLabel(entry.Reason)}）")));
+        RecallInfo.ToolTip = details.Count > 0 ? string.Join("\n", details) : null;
+    }
+
+    private static string ReasonLabel(string reason) => reason switch
+    {
+        "stable" => "常驻事实，每次都在",
+        "relevant" => "和这句话有关",
+        "recent" => "最近发生的",
+        "budget" => "这次字数不够了",
+        "stable-budget" => "常驻事实已经够多",
+        "weak" => "这次用不上",
+        _ => "收进了记忆"
+    };
+
     private void OnRuntimeStateChanged(object? sender, EventArgs e)
     {
         if (_closed) return;
@@ -317,6 +353,7 @@ public partial class MemoryWindow : Window
         RecordingCheckBox.IsChecked = _runtime.MemoryRecordingEnabled;
         _updating = false;
         UpdateRecordingHelp();
+        UpdateRecallInfo();
     }
 
     private void UpdateControls()
